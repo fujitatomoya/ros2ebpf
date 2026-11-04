@@ -1,0 +1,16 @@
+# Build environment for ros2ebpf_daemon / ros2ebpf_exporter (no ROS needed).
+# Used by CI and by `make build-image`; also the base of the runtime image.
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake pkg-config git ca-certificates \
+      clang-18 llvm-18 libbpf-dev linux-tools-common linux-tools-generic \
+      libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
+      python3 python3-pip python3-yaml python3-pytest python3-setuptools \
+      curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/clang-18 /usr/local/bin/clang \
+    && ln -sf /usr/bin/llvm-strip-18 /usr/local/bin/llvm-strip \
+    && ln -sf "$(ls -d /usr/lib/linux-tools/*/ | head -1)bpftool" /usr/local/bin/bpftool \
+    && bpftool version
+WORKDIR /src

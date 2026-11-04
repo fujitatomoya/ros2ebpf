@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2ebpf_exporter</name>
+  <version>0.1.0</version>
+  <description>Reads the ros2ebpf pinned BPF maps and renders Prometheus exposition. No ROS dependency.</description>
+  <maintainer email="fujita.tomoya@triorb.co.jp">Tomoya Fujita</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+  <build_depend>pkg-config</build_depend>
+  <depend>libbpf-dev</depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

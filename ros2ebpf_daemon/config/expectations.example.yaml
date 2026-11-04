@@ -1,0 +1,14 @@
+# /etc/ros2ebpf/expectations.yaml -- expected publish rates for ONE ROBOT.
+# A property of the robot, not the host: serve it from one host of the robot
+# (typically the one running the collector) and leave expectations_file empty
+# on the others. Exported without a host label; the collector adds robot=...
+#
+# Forms:
+#   /topic: <hz>
+#   /topic: {hz: <hz>, takers: <n>}     # takers = hosts/endpoints expected to take it (cross-host loss rule)
+/chatter: 1
+/odom: 50
+/imu/data: {hz: 200, takers: 1}
+/lidar/points:
+  hz: 10
+  takers: 2

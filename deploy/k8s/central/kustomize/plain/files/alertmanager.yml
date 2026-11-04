@@ -1,0 +1,27 @@
+# Minimal Alertmanager: everything to one receiver, grouped per robot.
+# Replace the receiver with Slack / PagerDuty / webhook as needed.
+route:
+  receiver: default
+  group_by: [robot, alertname]
+  group_wait: 30s
+  group_interval: 2m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="critical"]
+      receiver: default
+      repeat_interval: 1h
+
+receivers:
+  - name: default
+    # webhook_configs:
+    #   - url: http://ops-hook.internal/alerts
+    #     send_resolved: true
+
+inhibit_rules:
+  # a blind robot makes per-topic alerts noise
+  - source_matchers: [alertname="Ros2ebpfRobotBlind"]
+    target_matchers: [alertname=~"Ros2TopicRateLow|Ros2CrossHostLoss|Ros2SeqGaps"]
+    equal: [robot]
+  - source_matchers: [alertname="Ros2ebpfHostDown"]
+    target_matchers: [alertname=~"Ros2TopicRateLow|Ros2CrossHostLoss"]
+    equal: [robot]

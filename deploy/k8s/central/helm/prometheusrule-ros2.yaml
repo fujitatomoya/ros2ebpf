@@ -1,0 +1,107 @@
+# Generated from deploy/prometheus/rules/ros2.yaml (make k8s-rules)
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ros2ebpf
+  namespace: observability
+  labels:
+    release: kps
+spec:
+  groups:
+  - name: ros2ebpf-recording
+    interval: 15s
+    rules:
+    - record: robot_topic:ros2_rmw_publish:rate30s
+      expr: sum by (robot, domain_id, topic) (rate(ros2_rmw_publish_total[30s]))
+    - record: robot_host_topic:ros2_rmw_publish:rate30s
+      expr: sum by (robot, host, domain_id, topic) (rate(ros2_rmw_publish_total[30s]))
+    - record: robot_topic:ros2_rmw_take:rate1m
+      expr: sum by (robot, domain_id, topic) (rate(ros2_rmw_take_total[1m]))
+    - record: robot_topic:ros2_rmw_publish:rate1m
+      expr: sum by (robot, domain_id, topic) (rate(ros2_rmw_publish_total[1m]))
+  - name: ros2ebpf
+    rules:
+    - alert: Ros2TopicRateLow
+      expr: "robot_topic:ros2_rmw_publish:rate30s\n  < on (robot, topic) group_left () (0.8 * ros2_topic_expected_hz)\n"
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.robot }} {{ $labels.topic }} at {{ $value | humanize }} Hz, below 80% of expectation'
+        description: Publish rate of {{ $labels.topic }} (domain {{ $labels.domain_id }}) on robot {{ $labels.robot }} is {{ $value | humanize }} Hz.
+    - alert: Ros2TopicSilent
+      expr: "ros2_topic_expected_hz > 0\n  unless on (robot, topic) robot_topic:ros2_rmw_publish:rate30s > 0\n"
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.robot }} {{ $labels.topic }} expected but not published'
+    - alert: Ros2CrossHostLoss
+      expr: "robot_topic:ros2_rmw_take:rate1m\n  < on (robot, domain_id, topic)\n    (0.9 * robot_topic:ros2_rmw_publish:rate1m\n       * on (robot, topic) group_left () ros2_topic_expected_takers)\n"
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.robot }} {{ $labels.topic }}: takes below 90% of publishes x expected takers'
+    - alert: Ros2SeqGaps
+      expr: increase(ros2_rmw_take_seq_gap_total[5m]) > 0
+      labels:
+        severity: info
+      annotations:
+        summary: '{{ $labels.robot }}/{{ $labels.host }} {{ $labels.topic }}: {{ $value | humanize }} sequence gaps in 5m'
+    - alert: Ros2UdpDrops
+      expr: increase(ros2_udp_rcvbuf_drop_total[5m]) > 0
+      labels:
+        severity: info
+      annotations:
+        summary: '{{ $labels.robot }}/{{ $labels.host }} port {{ $labels.port }} ({{ $labels.comm }}): UDP receive queue drops'
+    - alert: Ros2ebpfHostDown
+      expr: up{job="ros2ebpf"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: ros2ebpfd on {{ $labels.robot }}/{{ $labels.instance }} not scrapeable
+    - alert: Ros2ebpfRobotBlind
+      expr: absent(up{job="ros2ebpf"})
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: no ros2ebpf samples from any robot
+    - alert: Ros2ebpfProbesMissing
+      expr: ros2ebpf_probes_attached < ros2ebpf_probes_configured
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: '{{ $labels.robot }}/{{ $labels.host }}: {{ $value }} of configured probe links not attached'
+    - alert: Ros2ebpfNameReadFailures
+      expr: increase(ros2ebpf_name_read_failures_total[10m]) > 0 or ros2ebpf_unknown_rmw_processes > 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.robot }}/{{ $labels.host }}: endpoint names unreadable (offset table {{ $labels.offset_table }} mismatch?)'
+    - alert: Ros2ebpfEventsDropped
+      expr: increase(ros2ebpf_events_dropped_total[10m]) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.robot }}/{{ $labels.host }}: ring buffer events dropped, some processes may be unresolved'
+    - alert: Ros2DomainIdUnknown
+      expr: count by (robot, host) (ros2_process_info{domain_id="unknown"}) > 0
+      for: 10m
+      labels:
+        severity: info
+      annotations:
+        summary: '{{ $labels.robot }}/{{ $labels.host }}: processes with unknown domain_id (CAP_SYS_PTRACE missing?)'
+    - alert: Ros2DomainShared
+      expr: 'count by (domain_id, topic) (group by (robot, domain_id, topic) (ros2_rmw_publish_total)) > 1
+
+        '
+      for: 10m
+      labels:
+        severity: info
+      annotations:
+        summary: topic {{ $labels.topic }} on domain {{ $labels.domain_id }} is published by more than one robot

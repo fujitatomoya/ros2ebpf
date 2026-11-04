@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2ebpf_interfaces</name>
+  <version>0.1.0</version>
+  <description>Control protocol schema (JSON-RPC over unix socket) shared by the ros2 ebpf CLI and ros2ebpfd.</description>
+  <maintainer email="fujita.tomoya@triorb.co.jp">Tomoya Fujita</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>cmake</buildtool_depend>
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

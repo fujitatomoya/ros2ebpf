@@ -1,0 +1,52 @@
+# /etc/ros2ebpf/config.yaml -- ros2ebpfd configuration (one file per host)
+#
+# Values shown are the defaults unless noted. Keys marked [restart] are read
+# only at start; everything else is re-read on `ros2 ebpf reload` / SIGHUP.
+
+host: ""                      # [restart] label on every series; "" = kernel hostname
+robot: ""                     # optional fallback label; normally the collector adds robot=... on remote_write
+
+# librmw_implementation.so files to probe. Processes started before or after
+# the daemon are covered: uprobes are keyed by inode. [restart]
+shims:
+  - path: /opt/ros/jazzy/lib/librmw_implementation.so
+    # distro: jazzy           # default: derived from the path (/opt/ros/<distro>/...)
+    # arch: x86_64            # default: uname -m
+# Also scan /proc/<pid>/maps every 5 s and attach to shims found inside
+# containers (reached through /proc/<pid>/root). Needs pid-namespace visibility
+# (`pid: host` for a containerised daemon).
+discover_shims: true
+
+identity:
+  read_environ: true          # ROS_DOMAIN_ID / RMW_IMPLEMENTATION / ROS_LOCALHOST_ONLY; needs CAP_SYS_PTRACE
+  default_domain_id: 0        # when the variable is not set
+
+probes:
+  publish: true               # rmw_publish, rmw_publish_loaned_message
+  take: true                  # rmw_take_with_info (uretprobe, counts taken == true)
+  services: true              # rmw_send_request / rmw_take_response / rmw_take_request / rmw_send_response
+  udp_drops: true             # tracepoint udp:udp_fail_queue_rcv_skb
+  # Sequence-number gap tracking on take, per topic (or `all`). Exact only for
+  # single-publisher topics and RMWs that fill publication_sequence_number.
+  seq_gap: []
+  # seq_gap: [/lidar/points, /camera/image_raw]
+
+topics:
+  exclude: [/parameter_events, /rosout]   # never counted (one hash lookup, then ignored)
+
+# Upper bounds of the inter-publish interval histogram, ascending, max 15.
+histogram_buckets_seconds: [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5, 1]
+
+exporter:
+  mode: inprocess             # [restart] inprocess | external (then run ros2ebpf-exporter)
+  listen: 0.0.0.0:9477        # [restart]
+  rmw_label: false            # add rmw="..." to endpoint series (cardinality: one series per vendor)
+
+control:
+  socket: /run/ros2ebpf/control.sock   # [restart] group ros2ebpf, mode 0660
+  http: ""                             # [restart] e.g. 0.0.0.0:9478 for remote `ros2 ebpf --host`; unauthenticated
+
+expectations_file: /etc/ros2ebpf/expectations.yaml   # exported as ros2_topic_expected_*; optional
+pin_root: /sys/fs/bpf/ros2ebpf        # [restart] pinned maps; counters survive daemon restarts
+# offset_table: jazzy/x86_64          # force a (distro, arch) entry instead of deriving it
+log_level: info                       # error | warn | info | debug

@@ -1,0 +1,35 @@
+# Values for prometheus-community/kube-prometheus-stack on a cluster that
+# already runs the Prometheus Operator:
+#   helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+#     -n observability -f deploy/k8s/central/helm/values-kube-prometheus-stack.yaml
+# Then load the rules and dashboards:
+#   kubectl -n observability apply -f deploy/k8s/central/helm/prometheusrule-ros2.yaml
+#   kubectl -n observability create configmap ros2ebpf-dashboards \
+#     --from-file=deploy/grafana/dashboards/ --dry-run=client -o yaml \
+#     | kubectl label --local -f - grafana_dashboard=1 -o yaml | kubectl apply -f -
+prometheus:
+  prometheusSpec:
+    enableRemoteWriteReceiver: true
+    retention: 30d
+    ruleSelectorNilUsesHelmValues: false     # pick up PrometheusRule objects we create
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 50Gi}}
+  ingress:
+    enabled: false                           # site specific; must terminate TLS and authenticate /api/v1/write
+alertmanager:
+  config:
+    route:
+      receiver: default
+      group_by: [robot, alertname]
+    receivers:
+      - name: default
+grafana:
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      folder: /tmp/dashboards
+      searchNamespace: ALL

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: grafana}}
+  template:
+    metadata:
+      labels: {app: grafana}
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:12.1.0
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: grafana-admin, key: password}}
+            - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+          ports: [{name: http, containerPort: 3000}]
+          volumeMounts:
+            - {name: datasources, mountPath: /etc/grafana/provisioning/datasources}
+            - {name: providers, mountPath: /etc/grafana/provisioning/dashboards}
+            - {name: dashboards, mountPath: /var/lib/grafana/dashboards}
+            - {name: data, mountPath: /var/lib/grafana}
+      volumes:
+        - {name: datasources, configMap: {name: grafana-datasources}}
+        - {name: providers, configMap: {name: grafana-dashboard-providers}}
+        - {name: dashboards, configMap: {name: grafana-dashboards}}
+        - {name: data, emptyDir: {}}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: grafana-admin, namespace: observability}
+type: Opaque
+stringData: {password: admin}          # change me
+---
+apiVersion: v1
+kind: Service
+metadata: {name: grafana, namespace: observability}
+spec:
+  selector: {app: grafana}
+  ports: [{name: http, port: 3000, targetPort: 3000}]

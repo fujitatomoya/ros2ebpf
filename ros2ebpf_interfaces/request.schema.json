@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fujitatomoya/ros2ebpf/ros2ebpf_interfaces/request.schema.json",
+  "title": "ros2ebpfd control request",
+  "type": "object",
+  "required": ["jsonrpc", "method"],
+  "properties": {
+    "jsonrpc": {"const": "2.0"},
+    "id": {"type": ["integer", "string", "null"]},
+    "method": {"enum": ["status", "enable", "disable", "reload", "snapshot", "config", "metrics", "discover"]},
+    "params": {
+      "type": "object",
+      "properties": {
+        "family": {"enum": ["publish", "take", "services", "udp_drops"]}
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"method": {"enum": ["enable", "disable"]}}},
+      "then": {"required": ["params"], "properties": {"params": {"required": ["family"]}}}
+    }
+  ]
+}

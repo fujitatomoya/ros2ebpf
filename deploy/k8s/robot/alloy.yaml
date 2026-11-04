@@ -1,0 +1,139 @@
+# Per-robot collector: scrapes the DaemonSet pods via kubernetes_sd, keeps a
+# WAL on a PVC, remote-writes to central with robot=... as external label.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ros2ebpf-alloy
+  namespace: ros2ebpf
+data:
+  config.alloy: |
+    logging { level = "info" }
+
+    discovery.kubernetes "ros2ebpfd" {
+      role = "pod"
+      namespaces { names = ["ros2ebpf"] }
+      selectors {
+        role  = "pod"
+        label = "app=ros2ebpfd"
+      }
+    }
+
+    discovery.relabel "ros2ebpfd" {
+      targets = discovery.kubernetes.ros2ebpfd.targets
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_port_name"]
+        regex         = "metrics"
+        action        = "keep"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_node_name"]
+        target_label  = "node"
+      }
+    }
+
+    prometheus.scrape "ros2ebpf" {
+      targets         = discovery.relabel.ros2ebpfd.output
+      job_name        = "ros2ebpf"
+      scrape_interval = "15s"
+      honor_labels    = true
+      forward_to      = [prometheus.remote_write.central.receiver]
+    }
+
+    prometheus.remote_write "central" {
+      endpoint {
+        url = sys.env("REMOTE_WRITE_URL")
+        bearer_token = sys.env("REMOTE_WRITE_TOKEN")
+        queue_config { retry_on_http_429 = true }
+      }
+      external_labels = {
+        robot = sys.env("ROBOT"),
+        site  = sys.env("SITE"),
+      }
+      wal {
+        max_keepalive_time = "8h"
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ros2ebpf-robot
+  namespace: ros2ebpf
+data:
+  ROBOT: amr-07                               # <-- set per robot
+  SITE: osaka-dc1
+  REMOTE_WRITE_URL: https://central.example.com/api/v1/write
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ros2ebpf-remote-write
+  namespace: ros2ebpf
+type: Opaque
+stringData:
+  REMOTE_WRITE_TOKEN: replace-me              # per-robot bearer token checked by the central ingress
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ros2ebpf-alloy
+  namespace: ros2ebpf
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ros2ebpf-alloy
+  namespace: ros2ebpf
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ros2ebpf-alloy
+  namespace: ros2ebpf
+subjects:
+  - {kind: ServiceAccount, name: ros2ebpf-alloy, namespace: ros2ebpf}
+roleRef: {kind: Role, name: ros2ebpf-alloy, apiGroup: rbac.authorization.k8s.io}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ros2ebpf-alloy-wal
+  namespace: ros2ebpf
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ros2ebpf-alloy
+  namespace: ros2ebpf
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: ros2ebpf-alloy}}
+  template:
+    metadata:
+      labels: {app: ros2ebpf-alloy}
+    spec:
+      serviceAccountName: ros2ebpf-alloy
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.6.1
+          args: [run, --storage.path=/var/lib/alloy, /etc/alloy/config.alloy]
+          envFrom:
+            - configMapRef: {name: ros2ebpf-robot}
+            - secretRef: {name: ros2ebpf-remote-write}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alloy}
+            - {name: wal, mountPath: /var/lib/alloy}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+      volumes:
+        - {name: config, configMap: {name: ros2ebpf-alloy}}
+        - {name: wal, persistentVolumeClaim: {claimName: ros2ebpf-alloy-wal}}

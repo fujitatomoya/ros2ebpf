@@ -1,0 +1,34 @@
+host: main
+robot: amr-07
+shims:
+  - distro: rolling
+    arch: x86_64
+    path: /opt/ros/rolling/lib/librmw_implementation.so
+  - path: /opt/ros/humble/lib/librmw_implementation.so
+discover_shims: false
+identity:
+  read_environ: true
+  default_domain_id: 3
+probes:
+  publish: true
+  take: yes
+  services: off
+  seq_gap: [/lidar/points, /camera/image_raw]
+  udp_drops: true
+topics:
+  exclude:
+    - /parameter_events
+    - /rosout
+histogram_buckets_seconds: [0.001, 0.01, 0.1, 1]
+exporter:
+  mode: external
+  listen: 127.0.0.1:9477
+  rmw_label: true
+control:
+  socket: /tmp/ctl.sock
+  http: 0.0.0.0:9478
+expectations_file: /etc/ros2ebpf/exp.yaml
+pin_root: /sys/fs/bpf/test
+offset_table: jazzy/aarch64
+log_level: debug
+unknown_key: ignored

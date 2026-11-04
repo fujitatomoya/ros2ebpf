@@ -1,0 +1,28 @@
+[Unit]
+Description=ros2ebpf daemon: ROS 2 endpoint statistics via eBPF
+Documentation=https://github.com/fujitatomoya/ros2ebpf
+After=network.target sys-fs-bpf.mount
+ConditionPathIsMountPoint=/sys/fs/bpf
+
+[Service]
+Type=simple
+ExecStartPre=/usr/sbin/ros2ebpfd --check -c /etc/ros2ebpf/config.yaml
+ExecStart=/usr/sbin/ros2ebpfd -c /etc/ros2ebpf/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=ros2ebpf
+RuntimeDirectoryMode=0755
+# Runs as root but with the minimal capability set; never as a ROS user.
+# CAP_SYS_PTRACE: read /proc/<pid>/environ for ROS_DOMAIN_ID. CAP_SYS_RESOURCE: memlock on old kernels.
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_SYS_RESOURCE CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_SYS_RESOURCE
+ProtectSystem=strict
+ReadWritePaths=/sys/fs/bpf /run/ros2ebpf
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

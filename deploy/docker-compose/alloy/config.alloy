@@ -1,0 +1,44 @@
+// Grafana Alloy: per-robot collector.
+// Scrapes every ros2ebpfd of this robot, buffers in a local WAL, and
+// remote-writes to central with the robot identity as external labels.
+
+logging { level = "info" }
+
+discovery.relabel "ros2ebpf" {
+  targets = [
+    // one entry per host of this robot; SCRAPE_TARGETS is "host1:9477,host2:9477"
+    { "__address__" = sys.env("SCRAPE_TARGETS") },
+  ]
+  // keep `instance` as the scrape address; `host` comes from the exporter itself
+}
+
+prometheus.scrape "ros2ebpf" {
+  targets         = discovery.relabel.ros2ebpf.output
+  job_name        = "ros2ebpf"
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+  honor_labels    = true          // do not overwrite the exporter's host/robot labels
+  forward_to      = [prometheus.remote_write.central.receiver]
+}
+
+prometheus.remote_write "central" {
+  endpoint {
+    url = sys.env("REMOTE_WRITE_URL")
+    // Production: TLS + a per-robot bearer token, see docs/deployment.md
+    // bearer_token = sys.env("REMOTE_WRITE_TOKEN")
+    queue_config {
+      max_samples_per_send = 2000
+      batch_send_deadline  = "5s"
+      retry_on_http_429    = true
+    }
+  }
+  external_labels = {
+    robot = sys.env("ROBOT"),
+    site  = sys.env("SITE"),
+  }
+  wal {
+    truncate_frequency = "2h"
+    min_keepalive_time = "5m"
+    max_keepalive_time = "8h"   // ride out ~8 h of link loss
+  }
+}

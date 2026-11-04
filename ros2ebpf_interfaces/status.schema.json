@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fujitatomoya/ros2ebpf/ros2ebpf_interfaces/status.schema.json",
+  "title": "ros2ebpfd status result",
+  "type": "object",
+  "required": ["version", "host", "probes", "probes_attached", "probes_expected", "exporter", "shims", "healthy"],
+  "properties": {
+    "version": {"type": "string"},
+    "pid": {"type": "integer"},
+    "uptime_seconds": {"type": "integer"},
+    "host": {"type": "string"},
+    "machine_id": {"type": "string"},
+    "robot": {"type": "string"},
+    "distro": {"type": "string"},
+    "arch": {"type": "string"},
+    "kernel": {"type": "string"},
+    "config_path": {"type": "string"},
+    "pin_root": {"type": "string"},
+    "offset_table": {"type": "string", "description": "distro/arch row of the struct offset table in use"},
+    "maps_recreated_at_start": {"type": "boolean"},
+    "shims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "source"],
+        "properties": {
+          "path": {"type": "string"},
+          "distro": {"type": "string"},
+          "arch": {"type": "string"},
+          "source": {"enum": ["config", "discovered"]},
+          "inode": {"type": "integer"},
+          "attach_failed": {"type": "boolean"}
+        }
+      }
+    },
+    "probes": {
+      "type": "object",
+      "propertyNames": {"enum": ["publish", "take", "services", "udp_drops"]},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["configured", "enabled", "attached", "expected"],
+        "properties": {
+          "configured": {"type": "boolean"},
+          "enabled": {"type": "boolean"},
+          "attached": {"type": "integer"},
+          "expected": {"type": "integer"}
+        }
+      }
+    },
+    "probes_attached": {"type": "integer"},
+    "probes_expected": {"type": "integer"},
+    "exporter": {
+      "type": "object",
+      "required": ["mode", "listen", "serving"],
+      "properties": {
+        "mode": {"enum": ["inprocess", "external"]},
+        "listen": {"type": "string"},
+        "serving": {"type": "boolean"},
+        "scrapes": {"type": "integer"},
+        "last_scrape_duration_seconds": {"type": "number"},
+        "expectations_file": {"type": "string"},
+        "expectations": {"type": "integer"}
+      }
+    },
+    "control": {"type": "object", "properties": {"socket": {"type": "string"}, "http": {"type": "string"}}},
+    "maps": {
+      "type": "object",
+      "properties": {
+        "endpoints": {"type": "integer"}, "processes": {"type": "integer"},
+        "udp_drops": {"type": "integer"}, "abi": {"type": "integer"}
+      }
+    },
+    "self_counters": {
+      "type": "object",
+      "properties": {
+        "name_read_failures": {"type": "integer"}, "id_read_failures": {"type": "integer"},
+        "events_dropped": {"type": "integer"}, "map_full": {"type": "integer"}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "domains_seen": {"type": "array", "items": {"type": ["integer", "string"]}},
+        "read_environ": {"type": "boolean"},
+        "resolved": {"type": "integer"},
+        "environ_read_failures": {"type": "integer"},
+        "resolve_failures": {"type": "integer"}
+      }
+    },
+    "healthy": {"type": "boolean"}
+  }
+}

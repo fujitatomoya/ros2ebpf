@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ros2ebpf
+resources:
+  - namespace.yaml
+  - daemonset.yaml
+  - alloy.yaml
+# Daemon config: `kubectl -n ros2ebpf create configmap ros2ebpf-config --from-file=config.yaml --from-file=expectations.yaml`
+# or uncomment to generate it from files next to this kustomization:
+# configMapGenerator:
+#   - name: ros2ebpf-config
+#     files: [config.yaml, expectations.yaml]
+#     options: {disableNameSuffixHash: true}
+images:
+  - name: ghcr.io/fujitatomoya/ros2ebpfd
+    newTag: 0.1.0

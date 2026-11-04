@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+resources:
+  - prometheus.yaml
+  - alertmanager.yaml
+  - grafana.yaml
+# files/ is a copy of deploy/prometheus and deploy/grafana made by `make k8s-sync`
+# (kustomize refuses to read files outside the kustomization directory).
+configMapGenerator:
+  - name: prometheus-config
+    files: [prometheus.yml=files/prometheus.yml]
+    options: {disableNameSuffixHash: true}
+  - name: prometheus-rules
+    files: [ros2.yaml=files/rules/ros2.yaml]
+    options: {disableNameSuffixHash: true}
+  - name: alertmanager-config
+    files: [alertmanager.yml=files/alertmanager.yml]
+    options: {disableNameSuffixHash: true}
+  - name: grafana-datasources
+    files: [prometheus.yaml=files/grafana/datasources/prometheus.yaml]
+    options: {disableNameSuffixHash: true}
+  - name: grafana-dashboard-providers
+    files: [ros2ebpf.yaml=files/grafana/providers/ros2ebpf.yaml]
+    options: {disableNameSuffixHash: true}
+  - name: grafana-dashboards
+    files:
+      - files/grafana/dashboards/ros2ebpf-fleet.json
+      - files/grafana/dashboards/ros2ebpf-robot.json
+      - files/grafana/dashboards/ros2ebpf-host.json
+      - files/grafana/dashboards/ros2ebpf-daemon-health.json
+    options: {disableNameSuffixHash: true}

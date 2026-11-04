@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2ebpf_daemon</name>
+  <version>0.1.0</version>
+  <description>ros2ebpfd: always-on ROS 2 endpoint statistics via eBPF uprobes on librmw_implementation.so. No ROS dependency.</description>
+  <maintainer email="fujita.tomoya@triorb.co.jp">Tomoya Fujita</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+  <build_depend>pkg-config</build_depend>
+  <build_depend>clang</build_depend>
+  <build_depend>bpftool</build_depend>
+  <depend>ros2ebpf_exporter</depend>
+  <depend>libbpf-dev</depend>
+  <depend>libyaml-dev</depend>
+  <depend>libjson-c-dev</depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>
