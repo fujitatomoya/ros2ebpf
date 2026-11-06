@@ -151,10 +151,9 @@ dashboards and commit the result; `make lint` runs it and validates everything.
 
 `rolling` is the default and development branch; pull requests target it. `main` is a read-only
 mirror of `rolling` (`.github/workflows/mirror-rolling-to-main.yaml` force-pushes it on every push
-to `rolling`, as the ROS 2 core repositories do), so `main` is never pushed to directly. Release
-branches named after the ROS distro (`jazzy`, `kilted`, ...) are created when the packages are
-released into that distro; Mergify (`.mergify.yml`) opens the backport pull request when a merged
-`rolling` PR carries a `backport-<distro>` or `backport-all` label.
+to `rolling`, as the ROS 2 core repositories do), so `main` is never pushed to directly. There are
+no release branches yet: the first one is created when the packages are released into a ROS
+distro, and nothing is backported before that.
 
 ## CI
 
