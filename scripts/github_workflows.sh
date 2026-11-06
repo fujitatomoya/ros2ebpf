@@ -255,6 +255,29 @@ function end_to_end () {
     # the CLI against the running daemon
     ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf status
     ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf top --once
+    # the TUI: one plain frame, then the real curses UI for a few seconds under a pseudo-terminal
+    local frame
+    frame=$(ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf monitor --once --interval 2)
+    echo "$frame"
+    echo "$frame" | grep -q 'local: healthy 16/16 links' || { echo "FAIL monitor --once health line"; fail=1; }
+    echo "$frame" | grep -qE 'publisher +/chatter +5 +talker' || { echo "FAIL monitor --once talker row"; fail=1; }
+    echo "$frame" | grep -qE 'subscription +/chatter +5 +listener' || { echo "FAIL monitor --once listener row"; fail=1; }
+    ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf monitor --once --view health | grep -q 'healthy: yes' || { echo "FAIL monitor --once health view"; fail=1; }
+    ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf monitor --once --view processes | grep -qE '[0-9]+ +talker +5 +rmw_' || { echo "FAIL monitor --once processes view"; fail=1; }
+    # `script` gives the UI a pseudo-terminal and forwards its stdin to it: switch views, then quit
+    # with `q`. `timeout --foreground` keeps the UI in the foreground process group (a background
+    # one reading the tty is stopped by SIGTTIN); -k is the safety net.
+    rm -f /tmp/monitor.tty
+    ( sleep 4; printf 'p'; sleep 1; printf 'h'; sleep 1; printf 'e'; sleep 1; printf 'q' ) | \
+        TERM=xterm-256color COLUMNS=160 LINES=40 script -qec \
+        "ROS2EBPF_SOCKET=/tmp/r2e.sock timeout --foreground -k 3 20 ros2 ebpf monitor --interval 1" /tmp/monitor.tty > /dev/null
+    local tty_rc=$?
+    if [ "$tty_rc" = 0 ] && grep -aq '/chatter' /tmp/monitor.tty && grep -aq 'Pub Hz' /tmp/monitor.tty \
+       && grep -aq 'healthy: yes' /tmp/monitor.tty; then
+        echo "PASS curses monitor under a pty: endpoints, processes and health views, quit with q"
+    else
+        echo "FAIL curses monitor under a pty (exit $tty_rc)"; sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' /tmp/monitor.tty | tail -20; fail=1
+    fi
 
     stop_daemon
     # only the processes started here: the container shares the host pid namespace

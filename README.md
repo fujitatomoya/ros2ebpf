@@ -219,6 +219,9 @@ curl -s localhost:9477/metrics | grep -E '^ros2_(rmw_publish_total|rmw_take_tota
 
 Nodes that were already running before the daemon started are counted from their next call: the uprobe lives on the library's inode, not on a process.
 
+For a live view instead of one table, `ros2 ebpf monitor` opens a full-screen terminal UI (colour is used only there): endpoint rates with a sparkline of the last intervals, the processes behind them, and the daemon health, with k9s-like keys (`e`, `p`, `h` to switch views, `/` to filter, `s` to sort, `q` to quit).
+Nothing else is needed on the host, no Prometheus and no browser.
+
 ### 4.6 Scrape it
 
 Smallest possible pipeline on the same host (Prometheus binary or container):
@@ -350,6 +353,7 @@ Global options: `--socket PATH` (local), `--host H` (repeatable: `user@host` via
 | `status [-v] [-q]` | health table; exit 1 if any configured family is not fully attached (readiness check) |
 | `enable <family>` / `disable <family>` | attach / detach `publish`, `take`, `services`, `udp_drops`; counters kept |
 | `reload` | re-read config.yaml + expectations.yaml, no detach |
+| `monitor [--interval S] [--view endpoints\|processes\|health] [--filter F] [--once] [--no-color]` | full-screen terminal view, no Prometheus or browser needed: endpoint rates with sparklines, processes, daemon health; `e`/`p`/`h` switch views, `/` filters, `s` sorts, `?` help, `q` quits; `--once` prints one plain frame |
 | `top [--topic T] [--domain D] [--kind K] [--interval S] [--once]` | live rates from two map reads (bench tool) |
 | `config show \| get KEY \| set KEY VALUE [--no-reload] \| keys` | edit the config file with validation, then reload |
 | `expectations capture [--duration S] [--takers] [-o FILE] \| show` | write expectations.yaml from observed rates |

@@ -271,6 +271,10 @@ It talks to the daemon over the control socket and never to DDS, so it works eve
 `--host` accepts ssh targets (`user@host`), `host:9478` (HTTP control) and `unix:///path`.
 Output is tabular by default and `--format json` for scripting; `status` exit code is non-zero when any probe family requested in config is not attached, so it can be used as a readiness check (`ros2ebpf-ctl status -q` does the same without ROS, for container probes).
 
+`ros2 ebpf monitor` is the terminal UI for the case where nobody wants to set up Prometheus and Grafana just to look: a curses view of endpoint rates (with a sparkline of the last intervals), the processes behind them, and the daemon health, switched with single keys the way k9s does it, filtered with `/`.
+Colour is used in this mode only; every other verb prints plain text.
+The view model (`ros2ebpf/monitor.py`) has no terminal code and is unit-tested; `--once` prints one frame as text for scripts and CI.
+
 ## 7. Metrics
 
 Label contract: `robot` (collector) and `host` (daemon) on everything; `domain_id` and `comm` on all endpoint series; `topic` / `service` fully expanded as seen by rmw; `rmw` optional (off by default, cardinality).
