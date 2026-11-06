@@ -70,7 +70,5 @@ jobs:
         run: |
           docker run --rm -v "$PWD/deploy:/d:ro" registry.k8s.io/kustomize/kustomize:v5.4.3 build /d/k8s/robot > /dev/null
           docker run --rm -v "$PWD/deploy:/d:ro" registry.k8s.io/kustomize/kustomize:v5.4.3 build /d/k8s/central/kustomize/plain > /dev/null
-      - name: compose config
-        run: docker compose -f deploy/docker-compose/compose.yaml config > /dev/null
       - name: alloy fmt
-        run: docker run --rm -v "$PWD/deploy/docker-compose/alloy:/a:ro" grafana/alloy:v1.6.1 fmt /a/config.alloy > /dev/null
+        run: docker run --rm -v "$PWD/deploy/alloy:/a:ro" grafana/alloy:v1.6.1 fmt /a/config.alloy > /dev/null

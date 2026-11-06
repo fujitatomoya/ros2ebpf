@@ -494,6 +494,15 @@ static int handle_rpc(void *ctx, const char *method, struct json_object *params,
         json_object_object_add(*result, "new_shims", json_object_new_int(n));
         return 0;
     }
+    if (!strcmp(method, "stop")) {
+        /* `ros2 ebpf stop`: same as SIGTERM, the maps stay pinned. The reply goes out before
+         * the loop notices d->stop. */
+        log_info("stop requested through the control socket");
+        d->stop = 1;
+        *result = json_object_new_object();
+        json_object_object_add(*result, "message", jstr("stopping"));
+        return 0;
+    }
     snprintf(errmsg, errlen, "unknown method '%s'", method);
     return -32601;
 }

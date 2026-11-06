@@ -1,4 +1,4 @@
-# ros2ebpf — Always-on ROS 2 endpoint statistics via eBPF
+# ros2ebpf — ROS 2 endpoint statistics via eBPF, on demand
 
 Design note, rev. 4 — 2026-11-04.
 
@@ -6,7 +6,7 @@ Design note, rev. 4 — 2026-11-04.
 - rev. 2 (2026-11-04): multi-host / multi-robot identity (`host`, `machine_id`, `robot`, `domain_id`).
 - rev. 3 (2026-11-04): restructured around the project's components — `ros2 ebpf` CLI, `ros2ebpfd`
   daemon, statistics exporter (placement decided in §5), Prometheus / Alertmanager — with repository
-  layout, interfaces between components, and deployment procedures for Docker Compose and Kubernetes.
+  layout, interfaces between components, and the deployment procedures (hosts and Kubernetes).
 - rev. 4 (2026-11-04): implementation notes (§13) recording where the first implementation deviates
   from or refines rev. 3, after the end-to-end run against ROS 2 Jazzy nodes in a container.
 
@@ -45,7 +45,7 @@ Design note, rev. 4 — 2026-11-04.
 | R9 | Every series carries host, robot and domain identity | `host` + `machine_id` from the OS, `robot` from operator config, `domain_id` per process |
 | R10 | Hosts of one robot may differ in distro, RMW vendor and CPU architecture | per-(distro, arch) offset table; identity exported, not assumed |
 | R11 | Operable through `ros2cli` like any other ROS 2 tool | `ros2 ebpf <verb>` |
-| R12 | Reference deployment that a user can bring up end to end | Docker Compose for a bench, Kubernetes manifests for fleet / central |
+| R12 | Reference deployment that a user can bring up end to end | Kubernetes manifests for the robot (DaemonSet) and the central side, Alloy config for a plain host |
 
 ## 3. Components and architecture
 
@@ -55,7 +55,7 @@ The project has four components. Two are built here, one is a thin layer whose p
 | Component | What it is | Runs where | Language / form |
 |---|---|---|---|
 | **`ros2 ebpf` CLI** (`ros2ebpf` package) | `ros2cli` verb extension; controls and queries the daemon | operator shell, any host of the robot | Python, `ros2cli` entry point |
-| **`ros2ebpfd` daemon** (`ros2ebpf_daemon`) | probe core: loads BPF programs, attaches uprobes/tracepoints, owns maps, resolves identity | one per Linux host, as a systemd unit or container | C (libbpf, CO-RE) + BPF C |
+| **`ros2ebpfd` daemon** (`ros2ebpf_daemon`) | probe core: loads BPF programs, attaches uprobes/tracepoints, owns maps, resolves identity | one per Linux host, started on request by the CLI, or as a container (DaemonSet) | C (libbpf, CO-RE) + BPF C |
 | **Statistics exporter** (`ros2ebpf_exporter`) | turns BPF map contents into Prometheus exposition (and other formats later) | in-process inside `ros2ebpfd` by default; separable (§5) | C library + optional standalone binary |
 | **Prometheus / Alertmanager / Grafana** | storage, rate computation, alerting, dashboards | per-robot collector + central server | upstream, unmodified; config and manifests in `deploy/` |
 
@@ -120,13 +120,12 @@ ros2ebpf/
 │   ├── bpf/                   # BPF C programs: rmw_probes.bpf.c, udp_drops.bpf.c, vmlinux_min.h
 │   ├── src/                   # loader (probes.c), identity, control socket, config, offsets, main, ros2ebpf-ctl
 │   ├── offsets/               # per-(distro, arch) struct offset table tooling (gen.sh)
-│   ├── config/                # config.example.yaml, expectations.example.yaml
-│   └── systemd/ros2ebpfd.service
+│   └── config/                # config.example.yaml, expectations.example.yaml
 ├── ros2ebpf_exporter/         # map reader + Prometheus exposition (C library + ros2ebpf-exporter binary)
 │   └── include/ros2ebpf/maps.h   # THE map contract shared by BPF, daemon and exporter
 ├── ros2ebpf_interfaces/       # control protocol (JSON-RPC over unix socket) schema + docs
 ├── deploy/
-│   ├── docker-compose/        # bench: daemon + Alloy + Prometheus + Alertmanager + Grafana on one box
+│   ├── alloy/                 # collector configuration for a robot host
 │   ├── k8s/                   # DaemonSet for ros2ebpfd + Alloy; central Prometheus/Alertmanager/Grafana manifests
 │   ├── prometheus/            # rules/ros2.yaml, alertmanager.yml, prometheus.yml
 │   └── grafana/               # provisioning + dashboards: fleet, robot, host, daemon health
@@ -431,8 +430,9 @@ groups:
 
 ## 9. Deployment
 
-Two reference deployments live in `deploy/`. Both use upstream images for Prometheus, Alertmanager,
-Grafana and Alloy without modification; only configuration is ours. The full procedures, including
+The reference deployment lives in `deploy/` (Kubernetes, plus the Alloy collector configuration
+for a plain host). It uses upstream images for Prometheus, Alertmanager, Grafana and Alloy without
+modification; only configuration is ours. The full procedures, including
 the multi-host robot setup, are in `README.md` and `docs/deployment.md`.
 
 ### 9.1 Requirements on every probed host
@@ -447,36 +447,35 @@ the multi-host robot setup, are in `README.md` and `docs/deployment.md`.
   `CAP_SYS_RESOURCE` if the map memlock limit is raised. Running as root is the simple alternative;
   never as a ROS user.
 
-### 9.2 Bare-metal / systemd (the normal case on a robot)
+### 9.2 Bare-metal, on demand (the normal case on a robot)
+
+The daemon is not a permanent service. Probing costs a little on every `rmw_*` call (§10), and the
+use cases are investigative: something is wrong on the ROS 2 network, or on one robot, and an
+operator wants statistics for a while. So the daemon is started and stopped by request, the way
+`ros2 daemon` is:
 
 ```
 sudo apt install ros-rolling-ros2ebpf-daemon                     # build farm package once released; or a colcon build
-sudo ros2 ebpf doctor                                             # kernel, bpffs, shim, offsets
+ros2 ebpf doctor                                                  # kernel, bpffs, shim, offsets
 sudo editor /etc/ros2ebpf/config.yaml                             # robot name, shims, probes
-sudo systemctl enable --now ros2ebpfd
+ros2 ebpf start                                                   # detached, via sudo -n; log in ~/.ros/log/ros2ebpfd.log
 ros2 ebpf status
 curl -s localhost:9477/metrics | grep ros2_rmw_publish_total | head
+ros2 ebpf stop                                                    # when done; the pinned maps keep the counters
 ```
 
-The unit file sets `AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_SYS_RESOURCE`,
-`ProtectSystem=strict`, `ReadWritePaths=/sys/fs/bpf /run/ros2ebpf`, and `Restart=on-failure`. Pinned
-maps survive restarts, so counters do not reset on upgrade.
+`ros2 ebpf start` spawns the binary in its own session, waits for the control socket and reports;
+the daemon chowns the socket to the user who ran sudo (or to the `ros2ebpf` group when it exists).
+`ros2 ebpf stop` sends the `stop` RPC. Pinned maps survive stop/start, so counters do not reset.
 
-### 9.3 Docker Compose (bench: everything on one machine)
-
-`deploy/docker-compose/compose.yaml` brings up one probed host plus the full pipeline, for trying the
-system against a locally running ROS 2 workspace or demo nodes (`--profile demo`). The daemon
-container runs with `pid: host` and `privileged: true` (or the explicit capability list), mounts
-`/sys/fs/bpf` and `/sys/kernel/btf`, and shares `/run/ros2ebpf` with the CLI container.
-
-### 9.4 Kubernetes
+### 9.3 Kubernetes
 
 `deploy/k8s/robot/`: a DaemonSet runs one `ros2ebpfd` per node (`hostPID`, `hostNetwork`), a per-robot
 Alloy Deployment scrapes them through `kubernetes_sd` and `remote_write`s to central.
 `deploy/k8s/central/`: plain kustomize manifests (Prometheus StatefulSet with remote-write receiver,
 Alertmanager, Grafana) or values for `kube-prometheus-stack`.
 
-### 9.5 Verifying an installation
+### 9.4 Verifying an installation
 
 1. `ros2 ebpf status` on each host: all configured probe families attached, offset table matches
    the distro, exporter mode `inprocess`, identity shows the expected `robot`.

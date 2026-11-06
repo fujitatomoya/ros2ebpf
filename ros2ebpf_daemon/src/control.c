@@ -56,12 +56,21 @@ int control_init(struct control *c, const char *socket_path, const char *http_ad
         log_error("control: bind %s: %s", socket_path, strerror(-rc));
         return rc;
     }
+    /* Who may talk to the daemon: the ros2ebpf group when it exists, otherwise the user who
+     * started it through sudo (`ros2 ebpf start`), otherwise root only. */
     struct group *g = getgrnam("ros2ebpf");
-    if (g)
+    const char *sudo_uid = getenv("SUDO_UID"), *sudo_gid = getenv("SUDO_GID");
+    char owner[64] = "";
+    if (g) {
         chown(socket_path, (uid_t)-1, g->gr_gid);
+        snprintf(owner, sizeof(owner), " (group ros2ebpf)");
+    } else if (sudo_uid && sudo_gid) {
+        chown(socket_path, (uid_t)atoi(sudo_uid), (gid_t)atoi(sudo_gid));
+        snprintf(owner, sizeof(owner), " (owner uid %s, started through sudo)", sudo_uid);
+    }
     chmod(socket_path, 0660);
     c->unix_fd = fd;
-    log_info("control socket at %s%s", socket_path, g ? " (group ros2ebpf)" : "");
+    log_info("control socket at %s%s", socket_path, owner);
 
     if (http_addr && http_addr[0]) {
         int hfd = ros2ebpf_http_listen(http_addr);

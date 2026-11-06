@@ -8,6 +8,7 @@
 | `ros2ebpf_daemon/test/test_config.c` | full `config.yaml` parse, defaults, `seq_gap: all`, empty lists clearing defaults, invalid values, immutable-key diff, offset table lookup, distro-from-path, ELF symbol check | `colcon test --packages-select ros2ebpf_daemon` |
 | `ros2ebpf/test/test_api.py` | unix-socket JSON-RPC client against a fake daemon, transports from host specs, `fleet.yaml`, target resolution, table formatting, rate computation (aggregation, filters, tombstones) | `colcon test --packages-select ros2ebpf` (or `cd ros2ebpf && pytest`) |
 | `ros2ebpf/test/test_verbs.py` | config get/set on a file, value coercion, status table, ELF parser on libc and (if present) a real shim | same |
+| `ros2ebpf/test/test_daemon.py` | `ros2 ebpf start` / `stop`: command line (sudo or not), log file, spawn detached, wait for the socket, stop through the `stop` RPC, failure paths (exit before answering, timeout, missing binary / config), against a fake `ros2ebpfd` executable | same |
 
 `colcon test --merge-install && colcon test-result --verbose` in the workspace (the C tests go
 through `ament_add_test`). The whole CI script, including the end-to-end test below, runs locally
@@ -30,11 +31,12 @@ Scenario: the daemon with a static shim on the mainline-built `librmw_implementa
 - publish-period histogram populated;
 - `/rosout` excluded by default;
 - `ros2_process_info` carries the pid, an `rmw_*` implementation and the domain;
+- the daemon is started with `ros2 ebpf start` and stopped with `ros2 ebpf stop` (mainline ros2cli);
 - `ros2ebpf_host_info{offset_table="rolling/…"}`;
 - `probes_attached == probes_configured`, zero name read failures;
 - short-lived client processes are swept (bounded number of process series);
 - `disable take` turns the family off and `status -q` stays 0; `enable take` re-attaches 2/2 links;
-- counters survive a restart of the daemon (pinned maps);
+- counters survive `ros2 ebpf stop` + `ros2 ebpf start` (pinned maps);
 - `ros2 ebpf status` and `ros2 ebpf top --once` (mainline ros2cli) against the daemon.
 
 The `images` job covers the cross-container case of README tutorial C: `ros2ebpfd:ci` with
@@ -66,20 +68,22 @@ e2e: all checks passed
 
 ```bash
 sudo install/bin/ros2ebpfd --check -c /etc/ros2ebpf/config.yaml
-sudo install/bin/ros2ebpfd -c /etc/ros2ebpf/config.yaml --log-level debug &
+sudo -v && ros2 ebpf start --log-level debug
 ros2 run demo_nodes_cpp talker &
-install/bin/ros2ebpf-ctl status
+ros2 ebpf status
 curl -s localhost:9477/metrics | grep chatter
+ros2 ebpf stop
 ```
 
-Expect `ready: 16/16 probe links attached` (one shim) and `ros2_rmw_publish_total{...topic="/chatter"}`.
+Expect `16/16 probe links` (one shim) and `ros2_rmw_publish_total{...topic="/chatter"}`; the daemon
+log is in `~/.ros/log/ros2ebpfd.log`.
 
 ## 4. Multi-host test plan (manual)
 
 Prerequisites: two or more hosts on one LAN, `ros2ebpfd` on each (package or container), a
-collector on one of them, a central Prometheus (the compose bench on a laptop is enough:
-`docker compose up -d prometheus alertmanager grafana` and point the collector's
-`REMOTE_WRITE_URL` at `http://<laptop>:9090/api/v1/write`).
+collector on one of them, a central Prometheus with the remote-write receiver enabled
+(`deploy/k8s/central/`, or any `prometheus --web.enable-remote-write-receiver` on a laptop; point
+the collector's `REMOTE_WRITE_URL` at `http://<laptop>:9090/api/v1/write`).
 
 | # | Step | Expected |
 |---|---|---|
@@ -93,7 +97,7 @@ collector on one of them, a central Prometheus (the compose bench on a laptop is
 | 8 | stop the talker | `Ros2TopicSilent` / `Ros2TopicRateLow` fire; resolve after restart |
 | 9 | disconnect host B from the LAN for 3 min | `Ros2ebpfHostDown{host="B"}` fires; no gap in B's series for the time it was still scrapeable |
 | 10 | disconnect the collector from central for 10 min | `Ros2ebpfRobotBlind` after 5 min; samples backfill on reconnect (WAL) |
-| 11 | `systemctl restart ros2ebpfd` on A while the talker runs | counters continue; `maps_recreated_at_start: false` |
+| 11 | `ros2 ebpf stop && ros2 ebpf start` on A while the talker runs | counters continue; `maps_recreated_at_start: false` |
 | 12 | two robots with the same domain id and topic names | `Ros2DomainShared` (info) fires; dashboards still separate them by `robot` |
 | 13 | upgrade the daemon package on one host | if the map ABI changed: one reset, log line `recreating`; otherwise counters continue |
 

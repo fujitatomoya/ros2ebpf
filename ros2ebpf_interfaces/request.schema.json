@@ -7,7 +7,7 @@
   "properties": {
     "jsonrpc": {"const": "2.0"},
     "id": {"type": ["integer", "string", "null"]},
-    "method": {"enum": ["status", "enable", "disable", "reload", "snapshot", "config", "metrics", "discover"]},
+    "method": {"enum": ["status", "enable", "disable", "reload", "snapshot", "config", "metrics", "discover", "stop"]},
     "params": {
       "type": "object",
       "properties": {
