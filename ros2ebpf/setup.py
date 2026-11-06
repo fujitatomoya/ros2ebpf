@@ -39,6 +39,8 @@ control socket (or ssh / HTTP for other hosts of a robot). It never creates a DD
             'ros2ebpf.verb = ros2ebpf.verb:VerbExtension',
         ],
         'ros2ebpf.verb': [
+            'start = ros2ebpf.verb.start:StartVerb',
+            'stop = ros2ebpf.verb.stop:StopVerb',
             'status = ros2ebpf.verb.status:StatusVerb',
             'enable = ros2ebpf.verb.enable:EnableVerb',
             'disable = ros2ebpf.verb.disable:DisableVerb',

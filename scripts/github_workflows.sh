@@ -13,9 +13,10 @@
 # ros2cli and demo_nodes_cpp (with everything they need) is built from
 # source here; then the offset table in ros2ebpf_daemon/src/offsets.c is
 # checked against the mainline rmw headers, the daemon attaches its
-# uprobes to the mainline-built librmw_implementation.so, `ros2 ebpf`
-# runs on the mainline ros2cli, and the end-to-end test runs the mainline
-# demo nodes under the daemon and asserts on the metrics.
+# uprobes to the mainline-built librmw_implementation.so, `ros2 ebpf
+# start` / `stop` on the mainline ros2cli drive its lifecycle, and the
+# end-to-end test runs the mainline demo nodes under the daemon and
+# asserts on the metrics.
 #
 # To avoid updating and modifying the files under `.github/workflows`,
 # this script should be adjusted accordingly, and `.github/workflows`
@@ -136,23 +137,27 @@ function check_rmw_offsets () {
 }
 
 function start_daemon () {
-    # The container runs privileged in the host pid namespace (see .github/workflows/ci.yaml): the daemon loads its BPF
-    # objects on the runner kernel (verifier check) and attaches the uprobes to the
-    # librmw_implementation.so that was just built from mainline source.
+    # `ros2 ebpf start` (mainline ros2cli) spawns the daemon detached, as root here, so no sudo.
+    # The container runs privileged in the host pid namespace (see .github/workflows/ci.yaml):
+    # the daemon loads its BPF objects on the runner kernel (verifier check) and attaches the
+    # uprobes to the librmw_implementation.so that was just built from mainline source.
     trap exit_trap ERR
     cd ${COLCON_WORKSPACE}
-    ./install/bin/ros2ebpfd -c /tmp/ci.yaml --log-level info >> /tmp/ros2ebpfd.log 2>&1 &
-    DAEMON_PID=$!
-    local i
-    for i in $(seq 1 30); do
-        if ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status -q >/dev/null 2>&1; then
-            echo "ros2ebpfd (pid ${DAEMON_PID}) healthy after ${i}s"
-            return 0
-        fi
-        sleep 1
-    done
-    echo "ros2ebpfd did not become healthy"
-    exit 1
+    ros2 ebpf --socket /tmp/r2e.sock start -c /tmp/ci.yaml --log-level info \
+        --log-file /tmp/ros2ebpfd.log --timeout 30
+    DAEMON_PID=$(./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status | sed -n 's/^ *"pid": *\([0-9]*\).*/\1/p' | head -1)
+    [ -n "${DAEMON_PID}" ] || { echo "no pid in status"; exit 1; }
+    echo "ros2ebpfd pid ${DAEMON_PID}"
+}
+
+function stop_daemon () {
+    trap exit_trap ERR
+    cd ${COLCON_WORKSPACE}
+    ros2 ebpf --socket /tmp/r2e.sock stop
+    if [ -n "${DAEMON_PID:-}" ] && kill -0 ${DAEMON_PID} 2>/dev/null; then
+        echo "ros2ebpfd (pid ${DAEMON_PID}) still alive after stop"
+        exit 1
+    fi
 }
 
 function verify_daemon () {
@@ -201,7 +206,7 @@ function end_to_end () {
     $bin/listener > /dev/null 2>&1 &
     $bin/add_two_ints_server > /dev/null 2>&1 &
     ( while true; do $bin/add_two_ints_client > /dev/null 2>&1 || true; sleep 1; done ) &
-    DEMO_PIDS=$(jobs -p | grep -v "^${DAEMON_PID}$" | tr '\n' ' ')
+    DEMO_PIDS=$(jobs -p | tr '\n' ' ')
     sleep 10
 
     m() { ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock metrics; }
@@ -239,10 +244,10 @@ function end_to_end () {
     ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock enable take > /dev/null
     if ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status | tr -d ' \n' | grep -q '"take":{"configured":true,"enabled":true,"attached":2,"expected":2'; then echo "PASS enable take -> 2/2 links"; else echo "FAIL re-enable take"; fail=1; fi
 
-    # restart: counters survive through the pinned maps
+    # stop / start: counters survive through the pinned maps
     local before after
     before=$(val 'ros2_rmw_publish_total{host="e2e",domain_id="'${ROS_DOMAIN_ID}'",comm="talker",topic="/chatter"}')
-    kill -TERM ${DAEMON_PID}; wait ${DAEMON_PID} || true
+    stop_daemon
     start_daemon; sleep 3
     after=$(val 'ros2_rmw_publish_total{host="e2e",domain_id="'${ROS_DOMAIN_ID}'",comm="talker",topic="/chatter"}')
     if [ "${after:-0}" -ge "${before:-1}" ]; then echo "PASS counters survived daemon restart ($before -> $after)"; else echo "FAIL counters reset on restart ($before -> $after)"; fail=1; fi
@@ -251,8 +256,9 @@ function end_to_end () {
     ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf status
     ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf top --once
 
+    stop_daemon
     # only the processes started here: the container shares the host pid namespace
-    kill ${DEMO_PIDS} ${DAEMON_PID} 2>/dev/null || true
+    kill ${DEMO_PIDS} 2>/dev/null || true
     wait 2>/dev/null || true
     if [ "$fail" = 0 ]; then echo "e2e: all checks passed"; else echo "e2e: FAILED"; exit 1; fi
 }

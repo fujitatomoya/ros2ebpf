@@ -19,7 +19,7 @@ from ros2ebpf.api import add_target_arguments
 
 
 class EbpfCommand(CommandExtension):
-    """Always-on ROS 2 endpoint statistics via eBPF (ros2ebpfd control)."""
+    """ROS 2 endpoint statistics via eBPF: start, stop and query ros2ebpfd."""
 
     def add_arguments(self, parser, cli_name):
         self._subparser = parser

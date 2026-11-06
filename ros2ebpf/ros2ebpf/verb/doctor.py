@@ -130,7 +130,7 @@ class DoctorVerb(VerbExtension):
         else:
             rep('WARN', 'privileges',
                 'this shell has no CAP_BPF; fine for the CLI, ros2ebpfd itself needs them '
-                '(systemd unit sets AmbientCapabilities)')
+                '(`ros2 ebpf start` runs it through sudo)')
 
         shims = list(args.shim)
         cfg = {}

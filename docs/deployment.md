@@ -41,10 +41,10 @@ discover_shims: true
 expectations_file: /etc/ros2ebpf/expectations.yaml         # the file exists on ONE host only (see §2)
 ```
 
-Then:
+Then, whenever statistics are wanted (the daemon is on demand, see README 4.3):
 
 ```bash
-sudo systemctl enable --now ros2ebpfd
+ros2 ebpf start                               # detached, through sudo -n; `ros2 ebpf stop` when done
 ros2ebpf-ctl status -q && echo healthy       # exit 0; no ROS needed on the host for this
 curl -s localhost:9477/metrics | grep -E '^ros2ebpf_(host_info|probes_attached|probes_configured)'
 ```
@@ -57,7 +57,7 @@ Firewall: allow `9477/tcp` from the collector host only. Do not expose it beyond
 
 ### Container instead of a package
 
-Same on every host, with Docker/Podman (see README §6 for the flags and why):
+Same on every host, with Docker/Podman (see README §5 for the flags and why):
 
 ```bash
 docker run -d --name ros2ebpfd --restart unless-stopped --pid host --privileged \
@@ -93,7 +93,7 @@ adds `robot`.
 
 ```bash
 sudo mkdir -p /etc/alloy /var/lib/alloy
-sudo cp deploy/docker-compose/alloy/config.alloy /etc/alloy/config.alloy
+sudo cp deploy/alloy/config.alloy /etc/alloy/config.alloy
 docker run -d --name alloy --restart unless-stopped --network host \
   -v /etc/alloy/config.alloy:/etc/alloy/config.alloy:ro -v /var/lib/alloy:/var/lib/alloy \
   -e ROBOT=amr-07 -e SITE=osaka-dc1 \
@@ -110,19 +110,11 @@ label is not overwritten by `instance`. The WAL on `/var/lib/alloy` buffers link
 
 Check on the collector host: `curl -s localhost:12345/-/ready` (Alloy UI on 12345 if enabled), and
 in Alloy's log that every target is `up`. A Prometheus agent (`prometheus --agent`) with the
-equivalent `scrape_configs` + `remote_write` (README §9) works the same way.
+equivalent `scrape_configs` + `remote_write` (README §8) works the same way.
 
 ## 3. Central
 
-### 3.1 Compose (one site, small fleet)
-
-`deploy/docker-compose/compose.yaml` is the bench, but its `prometheus`, `alertmanager` and
-`grafana` services are a usable central: start only those (`docker compose up -d prometheus
-alertmanager grafana`), put a TLS-terminating reverse proxy with per-robot bearer tokens in front
-of `:9090/api/v1/write`, and point every robot's collector at it. Retention and storage:
-`--storage.tsdb.retention.time` and the `prom-data` volume.
-
-### 3.2 Kubernetes
+### 3.1 Kubernetes
 
 Plain manifests:
 
@@ -146,7 +138,7 @@ kubectl -n observability create configmap ros2ebpf-dashboards --from-file=deploy
 The ingress for `/api/v1/write` is site specific (`deploy/k8s/central/kustomize/plain/ingress.yaml`
 is a commented stub): terminate TLS and require a bearer token per robot.
 
-### 3.3 Check
+### 3.2 Check
 
 In Prometheus (`/graph`):
 
@@ -214,12 +206,12 @@ What to run once all three layers are up (this is also the checklist in
    replays B's samples when it is back (no gap for the period B was reachable from the collector).
 6. Stop the collector host's link to central for 10 minutes: no alert from central except
    `Ros2ebpfRobotBlind` after 5 minutes; samples backfill on reconnect.
-7. `sudo systemctl restart ros2ebpfd` on any host: counters continue from their previous values
+7. `ros2 ebpf stop && ros2 ebpf start` on any host: counters continue from their previous values
    (`maps_recreated_at_start: false` in status).
 
 ## 7. Security notes
 
-- `ros2ebpfd` runs as root with a reduced capability set (unit file). It reads `environ` of ROS
+- `ros2ebpfd` runs as root (`ros2 ebpf start` goes through `sudo -n`; the DaemonSet runs it privileged). It reads `environ` of ROS
   processes (`CAP_SYS_PTRACE`); that is the only process data it touches.
 - The control socket is group `ros2ebpf`, mode 0660. The optional control HTTP listener has no
   authentication; leave it off unless the robot LAN is trusted.

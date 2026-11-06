@@ -80,15 +80,9 @@ if(BUILD_TESTING)
 endif()
 
 # ---- install --------------------------------------------------------------
-# Executables: bin/ so they are on PATH (systemd unit, containers), lib/<pkg>/ for `ros2 run`.
+# Executables: bin/ so they are on PATH (`ros2 ebpf start`, containers), lib/<pkg>/ for `ros2 run`.
 install(TARGETS ros2ebpfd ros2ebpf-ctl RUNTIME DESTINATION bin)
 install(TARGETS ros2ebpfd ros2ebpf-ctl RUNTIME DESTINATION lib/${PROJECT_NAME})
-
-# systemd unit with the absolute daemon path of this install prefix
-# (<workspace>/install/bin/ros2ebpfd for a colcon build, /opt/ros/<distro>/bin/ros2ebpfd from the build farm).
-set(ROS2EBPFD_BIN ${CMAKE_INSTALL_PREFIX}/bin/ros2ebpfd)
-configure_file(systemd/ros2ebpfd.service.in ${CMAKE_CURRENT_BINARY_DIR}/ros2ebpfd.service @ONLY)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ros2ebpfd.service DESTINATION lib/systemd/system)
 
 # example configs: <prefix>/etc/ros2ebpf (the daemon reads /etc/ros2ebpf/config.yaml)
 install(FILES config/config.example.yaml config/expectations.example.yaml

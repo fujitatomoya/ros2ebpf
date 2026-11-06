@@ -24,9 +24,8 @@ colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 colcon test --merge-install && colcon test-result --verbose
 ```
 
-`--merge-install` gives one prefix (`install/bin`, `install/etc/ros2ebpf`,
-`install/lib/systemd/system`) that the tutorials and the container images rely on; without it every
-package gets its own prefix under `install/<pkg>/`.
+`--merge-install` gives one prefix (`install/bin`, `install/etc/ros2ebpf`) that the tutorials and
+the container images rely on; without it every package gets its own prefix under `install/<pkg>/`.
 
 `rosdep install --from-paths . --ignore-src -y --skip-keys "libbpf-dev bpftool"` resolves the
 remaining dependencies; `libbpf-dev` and `bpftool` have no rosdep key yet (see Packaging below)
@@ -44,8 +43,8 @@ and builds `rmw`, `rmw_implementation`, `ros2cli` and `demo_nodes_cpp` with ever
 runs the unit tests and flake8, checks the offset table in `ros2ebpf_daemon/src/offsets.c` against
 the mainline `rmw` headers (`offsets/gen.sh`), starts the daemon on the kernel with its uprobes
 attached to the mainline-built `librmw_implementation.so` (all probe links must attach and the
-`rolling/<arch>` offset table must be in use), runs `ros2 ebpf` on the mainline ros2cli against it,
-and runs the end-to-end test with the mainline demo nodes (docs/testing.md). The image comes from
+`rolling/<arch>` offset table must be in use), drives it with `ros2 ebpf start` / `stop` on the
+mainline ros2cli, and runs the end-to-end test with the mainline demo nodes (docs/testing.md). The image comes from
 [ros2_devenv_builder](https://github.com/fujitatomoya/ros2_devenv_builder) and carries every ROS
 build dependency; the script adds the BPF toolchain.
 
@@ -130,9 +129,10 @@ The packages are source packages; binaries come from the ROS build farm (bloom r
 `ros-<distro>-ros2ebpf-*` under `/opt/ros/<distro>`) like for any ROS 2 package, and nothing is
 packaged in this repository. Prerequisite: rosdep keys for `libbpf-dev` and `bpftool` (a
 `ros/rosdistro` pull request); until they exist `rosdep install` needs
-`--skip-keys "libbpf-dev bpftool"`. The daemon links the exporter library statically, installs the
-systemd unit with the absolute daemon path of its prefix to `lib/systemd/system/` and the example
-configs to `etc/ros2ebpf/`; the daemon itself reads `/etc/ros2ebpf/config.yaml`.
+`--skip-keys "libbpf-dev bpftool"`. The daemon links the exporter library statically and installs
+the example configs to `etc/ros2ebpf/`; it reads `/etc/ros2ebpf/config.yaml` by default. There is
+no service file: the daemon is started on request with `ros2 ebpf start` (README 4.3) or as the
+Kubernetes DaemonSet.
 
 Container images for the deployments under `deploy/`: `docker/Dockerfile.daemon` (daemon + exporter
 + ctl on Ubuntu 26.04, built from rolling binaries), `docker/Dockerfile.cli`, `docker/Dockerfile.demo`.
@@ -143,7 +143,7 @@ Container images for the deployments under `deploy/`: `docker/Dockerfile.daemon`
 `deploy/k8s/central/kustomize/plain/files/` (kustomize cannot read outside its directory) and
 regenerates `deploy/k8s/central/helm/prometheusrule-ros2.yaml`. Run it after editing rules or
 dashboards and commit the result; the `deploy-lint` CI job runs it and fails on a stale copy, then
-validates everything with promtool, amtool, kustomize, `docker compose config` and `alloy fmt`.
+validates everything with promtool, amtool, kustomize and `alloy fmt` (`deploy/alloy/config.alloy`).
 
 ## Branches
 
@@ -168,7 +168,7 @@ distro, and nothing is backported before that.
   `ros2 ebpf --help` in the CLI image, and the daemon in its own container discovering the demo
   container's shim through `/proc` (README tutorial C).
 - `deploy-lint`: `deploy/k8s/sync.sh` must leave no diff, then validation of everything under
-  `deploy/` (promtool, amtool, kustomize, compose, alloy fmt).
+  `deploy/` (promtool, amtool, kustomize, alloy fmt).
 
 When a release branch is created, its workflow is a copy of the `rolling` job with the
 distro's `ros2dev` image, as in the other `fujitatomoya` repositories.
