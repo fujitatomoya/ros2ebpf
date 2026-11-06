@@ -27,6 +27,12 @@ packages with a `package.xml`, `ros2ebpf` is ament_python):
 colcon build --packages-up-to ros2ebpf ros2ebpf_daemon
 ```
 
+The in-tree `build/` directory produced by `make` / `cmake` is marked with `COLCON_IGNORE` (by the
+Makefile and by both CMake projects at configure time), so a checkout that was also built natively
+or packaged with `make deb` does not confuse colcon with the staged copies of `package.xml` under
+`build/*/_CPack_Packages/`. If you configured with plain `cmake` before that marker existed, run
+`touch build/COLCON_IGNORE` once or remove `build/`.
+
 Cross build for aarch64: `-DBPF_TARGET_ARCH=arm64` for the BPF objects plus a normal CMake
 toolchain file for the user-space parts; `docker buildx build --platform linux/arm64 -f
 docker/Dockerfile.daemon .` is the simplest route.
