@@ -1,9 +1,8 @@
 # Deployment: multi-host robots and a fleet
 
-This is the operator procedure for a robot made of several Linux hosts, a fleet of such robots, and
-a central Prometheus / Alertmanager / Grafana. The single-host tutorials are in the
-[README](../README.md). Every step ends with what to check, so a problem is caught at the layer it
-belongs to.
+This is the operator procedure for a robot made of several Linux hosts, a fleet of such robots, and a central Prometheus / Alertmanager / Grafana.
+The single-host tutorials are in the [README](../README.md).
+Every step ends with what to check, so a problem is caught at the layer it belongs to.
 
 ```
 robot amr-07                                     central
@@ -15,13 +14,14 @@ robot amr-07                                     central
 └───────────────────────────────────────────┘    robot amr-08 … ─────────────────┘
 ```
 
-Deployment unit: host. Aggregation unit: robot (`robot=` is added by the collector). Correlation
-scope: `(robot, domain_id)`.
+Deployment unit: host.
+Aggregation unit: robot (`robot=` is added by the collector).
+Correlation scope: `(robot, domain_id)`.
 
 ## 1. Every host of the robot: `ros2ebpfd`
 
-Repeat on each host (`main`, `perception`, `arm` …). Hosts may run different ROS distros, RMWs and
-CPU architectures; each daemon exports what it found in `ros2ebpf_host_info`.
+Repeat on each host (`main`, `perception`, `arm` …).
+Hosts may run different ROS distros, RMWs and CPU architectures; each daemon exports what it found in `ros2ebpf_host_info`.
 
 ```bash
 # install: a colcon build of this repository (README 4.1), the container image, or the
@@ -49,11 +49,11 @@ ros2ebpf-ctl status -q && echo healthy       # exit 0; no ROS needed on the host
 curl -s localhost:9477/metrics | grep -E '^ros2ebpf_(host_info|probes_attached|probes_configured)'
 ```
 
-Check: `ros2ebpf_probes_attached == ros2ebpf_probes_configured`, `ros2ebpf_host_info` shows the
-expected `host`, `distro`, `arch`, `offset_table`. If nodes are running: `ros2_process_info` lists
-them with the right `domain_id`.
+Check: `ros2ebpf_probes_attached == ros2ebpf_probes_configured`, `ros2ebpf_host_info` shows the expected `host`, `distro`, `arch`, `offset_table`.
+If nodes are running: `ros2_process_info` lists them with the right `domain_id`.
 
-Firewall: allow `9477/tcp` from the collector host only. Do not expose it beyond the robot LAN.
+Firewall: allow `9477/tcp` from the collector host only.
+Do not expose it beyond the robot LAN.
 
 ### Container instead of a package
 
@@ -66,8 +66,7 @@ docker run -d --name ros2ebpfd --restart unless-stopped --pid host --privileged 
 docker exec ros2ebpfd ros2ebpf-ctl status -q && echo healthy
 ```
 
-Kubernetes (k3s/MicroK8s on the robot): `deploy/k8s/robot/` runs the same container as a DaemonSet;
-see §5.
+Kubernetes (k3s/MicroK8s on the robot): `deploy/k8s/robot/` runs the same container as a DaemonSet; see §5.
 
 ## 2. One host of the robot: expectations and the collector
 
@@ -85,9 +84,8 @@ ros2 ebpf reload
 curl -s localhost:9477/metrics | grep ros2_topic_expected
 ```
 
-`takers` is the number of endpoints across the robot that are expected to take the topic; it makes
-the cross-host loss rule exact. Expectations are exported without a `host` label; the collector
-adds `robot`.
+`takers` is the number of endpoints across the robot that are expected to take the topic; it makes the cross-host loss rule exact.
+Expectations are exported without a `host` label; the collector adds `robot`.
 
 ### 2.2 Collector: Grafana Alloy
 
@@ -102,15 +100,12 @@ docker run -d --name alloy --restart unless-stopped --network host \
   grafana/alloy:v1.6.1 run --storage.path=/var/lib/alloy /etc/alloy/config.alloy
 ```
 
-The shipped `config.alloy` takes `SCRAPE_TARGETS` as a single `__address__`; for several hosts
-either list several `{ "__address__" = "..." }` entries in `discovery.relabel.ros2ebpf.targets`, or
-use `discovery.dns` / a file-based target list. Keep `honor_labels = true` so the exporter's `host`
-label is not overwritten by `instance`. The WAL on `/var/lib/alloy` buffers link loss
-(`max_keepalive_time = "8h"`).
+The shipped `config.alloy` takes `SCRAPE_TARGETS` as a single `__address__`; for several hosts either list several `{ "__address__" = "..." }` entries in `discovery.relabel.ros2ebpf.targets`, or use `discovery.dns` / a file-based target list.
+Keep `honor_labels = true` so the exporter's `host` label is not overwritten by `instance`.
+The WAL on `/var/lib/alloy` buffers link loss (`max_keepalive_time = "8h"`).
 
-Check on the collector host: `curl -s localhost:12345/-/ready` (Alloy UI on 12345 if enabled), and
-in Alloy's log that every target is `up`. A Prometheus agent (`prometheus --agent`) with the
-equivalent `scrape_configs` + `remote_write` (README §8) works the same way.
+Check on the collector host: `curl -s localhost:12345/-/ready` (Alloy UI on 12345 if enabled), and in Alloy's log that every target is `up`.
+A Prometheus agent (`prometheus --agent`) with the equivalent `scrape_configs` + `remote_write` (README §8) works the same way.
 
 ## 3. Central
 
@@ -135,8 +130,7 @@ kubectl -n observability create configmap ros2ebpf-dashboards --from-file=deploy
   --dry-run=client -o yaml | kubectl label --local -f - grafana_dashboard=1 -o yaml | kubectl apply -f -
 ```
 
-The ingress for `/api/v1/write` is site specific (`deploy/k8s/central/kustomize/plain/ingress.yaml`
-is a commented stub): terminate TLS and require a bearer token per robot.
+The ingress for `/api/v1/write` is site specific (`deploy/k8s/central/kustomize/plain/ingress.yaml` is a commented stub): terminate TLS and require a bearer token per robot.
 
 ### 3.2 Check
 
@@ -164,9 +158,8 @@ robots:
       - {name: arm, address: 192.168.7.30, transport: http, port: 9478}   # needs control.http on that daemon
 ```
 
-ssh targets need `ros2ebpf-ctl` on the remote host (part of the daemon package) and key-based
-login; nothing listens on the network for that. HTTP targets need `control.http: 0.0.0.0:9478` in
-that host's config and are unauthenticated: robot LAN only.
+ssh targets need `ros2ebpf-ctl` on the remote host (part of the daemon package) and key-based login; nothing listens on the network for that.
+HTTP targets need `control.http: 0.0.0.0:9478` in that host's config and are unauthenticated: robot LAN only.
 
 ```bash
 ros2 ebpf status --robot amr-07
@@ -187,35 +180,26 @@ kubectl -n ros2ebpf get pods -o wide                         # one ros2ebpfd per
 kubectl -n ros2ebpf exec ds/ros2ebpfd -- ros2ebpf-ctl status
 ```
 
-ROS nodes running as pods are covered through discovery; the pod's container id lands in
-`ros2_process_info{container}`. Nodes on the node itself are covered as well (hostPID).
+ROS nodes running as pods are covered through discovery; the pod's container id lands in `ros2_process_info{container}`.
+Nodes on the node itself are covered as well (hostPID).
 
 ## 6. Multi-host verification plan
 
-What to run once all three layers are up (this is also the checklist in
-[testing.md](testing.md) §4):
+What to run once all three layers are up (this is also the checklist in [testing.md](testing.md) §4):
 
 1. Per host: `ros2ebpf-ctl status -q` exits 0; `ros2ebpf_host_info` has the right `host`.
-2. Start a talker on host A and a listener on host B in the same domain:
-   `ros2_rmw_publish_total{host="A",topic="/chatter"}` and `ros2_rmw_take_total{host="B",topic="/chatter"}`
-   grow at the same rate in Prometheus (`rate(...[1m])`), both with `robot="amr-07"`.
+2. Start a talker on host A and a listener on host B in the same domain: `ros2_rmw_publish_total{host="A",topic="/chatter"}` and `ros2_rmw_take_total{host="B",topic="/chatter"}` grow at the same rate in Prometheus (`rate(...[1m])`), both with `robot="amr-07"`.
 3. `ros2 ebpf status --robot amr-07` shows every host healthy.
-4. Set `/chatter: {hz: 1, takers: 1}` in expectations; stop the listener: `Ros2CrossHostLoss` fires
-   within ~3 minutes; stop the talker: `Ros2TopicSilent` / `Ros2TopicRateLow` fire; restart both: alerts resolve.
-5. Unplug host B from the LAN for a few minutes: `Ros2ebpfHostDown` fires; the collector's WAL
-   replays B's samples when it is back (no gap for the period B was reachable from the collector).
-6. Stop the collector host's link to central for 10 minutes: no alert from central except
-   `Ros2ebpfRobotBlind` after 5 minutes; samples backfill on reconnect.
-7. `ros2 ebpf stop && ros2 ebpf start` on any host: counters continue from their previous values
-   (`maps_recreated_at_start: false` in status).
+4. Set `/chatter: {hz: 1, takers: 1}` in expectations; stop the listener: `Ros2CrossHostLoss` fires within ~3 minutes; stop the talker: `Ros2TopicSilent` / `Ros2TopicRateLow` fire; restart both: alerts resolve.
+5. Unplug host B from the LAN for a few minutes: `Ros2ebpfHostDown` fires; the collector's WAL replays B's samples when it is back (no gap for the period B was reachable from the collector).
+6. Stop the collector host's link to central for 10 minutes: no alert from central except `Ros2ebpfRobotBlind` after 5 minutes; samples backfill on reconnect.
+7. `ros2 ebpf stop && ros2 ebpf start` on any host: counters continue from their previous values (`maps_recreated_at_start: false` in status).
 
 ## 7. Security notes
 
-- `ros2ebpfd` runs as root (`ros2 ebpf start` goes through `sudo -n`; the DaemonSet runs it privileged). It reads `environ` of ROS
-  processes (`CAP_SYS_PTRACE`); that is the only process data it touches.
-- The control socket is group `ros2ebpf`, mode 0660. The optional control HTTP listener has no
-  authentication; leave it off unless the robot LAN is trusted.
+- `ros2ebpfd` runs as root (`ros2 ebpf start` goes through `sudo -n`; the DaemonSet runs it privileged).
+  It reads `environ` of ROS processes (`CAP_SYS_PTRACE`); that is the only process data it touches.
+- The control socket is group `ros2ebpf`, mode 0660. The optional control HTTP listener has no authentication; leave it off unless the robot LAN is trusted.
 - `/metrics` has no authentication either; restrict `9477/tcp` to the collector.
-- `remote_write` leaves the robot: use TLS and a per-robot token at the central ingress; rotate
-  tokens by replacing the Secret / env and restarting the collector.
+- `remote_write` leaves the robot: use TLS and a per-robot token at the central ingress; rotate tokens by replacing the Secret / env and restarting the collector.
 - Nothing in this stack creates a DDS participant or sends anything on the ROS 2 domain.

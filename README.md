@@ -2,13 +2,10 @@
 
 **ROS 2 full observability statistics empowered by eBPF.**
 
-`ros2ebpf` gives you publish / take / service-call rates, drop indicators and per-process
-identity for every ROS 2 process on a host, **without touching, rebuilding or restarting the
-nodes**. A small daemon (`ros2ebpfd`) attaches eBPF uprobes to the shipped
-`librmw_implementation.so`, aggregates in kernel maps, and serves Prometheus metrics. It runs on
-demand: `ros2 ebpf start` when you want to look at a robot, `ros2 ebpf stop` when you are done,
-the same way `ros2 daemon` is started by request. Alert rules, Grafana dashboards and a Kubernetes
-DaemonSet for whole-cluster statistics are included.
+`ros2ebpf` gives you publish / take / service-call rates, drop indicators and per-process identity for every ROS 2 process on a host, **without touching, rebuilding or restarting the nodes**.
+A small daemon (`ros2ebpfd`) attaches eBPF uprobes to the shipped `librmw_implementation.so`, aggregates in kernel maps, and serves Prometheus metrics.
+It runs on demand: `ros2 ebpf start` when you want to look at a robot, `ros2 ebpf stop` when you are done, the same way `ros2 daemon` is started by request.
+Alert rules, Grafana dashboards and a Kubernetes DaemonSet for whole-cluster statistics are included.
 
 ```
 ros2_rmw_publish_total{host="main",robot="amr-07",domain_id="5",comm="talker",topic="/chatter"} 1181
@@ -21,7 +18,8 @@ ros2_process_info{host="main",robot="amr-07",comm="talker",pid="4211",domain_id=
 - One daemon per Linux host; a robot is a set of hosts; a fleet is a set of robots.
 - Nodes in containers are covered automatically (the daemon finds their shim through `/proc`).
 - The daemon never computes a rate: counters are exported, Prometheus does the math.
-- Design: [docs/design.md](docs/design.md). Metrics: [docs/metrics.md](docs/metrics.md).
+- Design: [docs/design.md](docs/design.md).
+  Metrics: [docs/metrics.md](docs/metrics.md).
   Multi-host / fleet: [docs/deployment.md](docs/deployment.md).
 
 ## Contents
@@ -55,11 +53,9 @@ ROS 2 node ──► librcl.so ──► librmw_implementation.so ──► vend
        └── /run/ros2ebpf/control.sock  (JSON-RPC: ros2 ebpf status / enable / disable / reload / top …)
 ```
 
-Every `rmw_*` entry point receives a public handle whose first fields are
-`{implementation_identifier, data, topic_name|service_name}`. The probe reads the name once per
-handle, keys counters by `(pid, handle)`, and the exporter joins them with per-process identity
-(`comm`, `domain_id`, container) at scrape time. Per-robot identity (`robot=`) is added by the
-collector (Grafana Alloy / Prometheus agent) on `remote_write`.
+Every `rmw_*` entry point receives a public handle whose first fields are `{implementation_identifier, data, topic_name|service_name}`.
+The probe reads the name once per handle, keys counters by `(pid, handle)`, and the exporter joins them with per-process identity (`comm`, `domain_id`, container) at scrape time.
+Per-robot identity (`robot=`) is added by the collector (Grafana Alloy / Prometheus agent) on `remote_write`.
 
 Components:
 
@@ -101,21 +97,18 @@ Probed host (robot computer):
 
 Build host (can be the same machine, or the Docker toolchain image):
 
-- ros2ebpf follows **ROS 2 Rolling** only: it is built and tested against Rolling (CI builds
-  mainline from source), and a distro branch is created when the next release is branched. The
-  build needs `ament_cmake` and `colcon` from a Rolling install (binary or source); the packages
-  are built like any other ROS 2 workspace. The daemon and exporter still do not use ROS at runtime.
-- Ubuntu 26.04: `clang`, `llvm`, `libbpf-dev` (≥ 1.0), `bpftool`, `cmake`, `libyaml-dev`,
-  `libjson-c-dev`, `libelf-dev`, `zlib1g-dev`.
-- Ubuntu 22.04 ships libbpf 0.5, which is too old: build on 24.04 or newer, use the `ros2ebpfd`
-  container image, or build libbpf ≥ 1.3 from source first.
+- ros2ebpf follows **ROS 2 Rolling** only: it is built and tested against Rolling (CI builds mainline from source), and a distro branch is created when the next release is branched.
+  The build needs `ament_cmake` and `colcon` from a Rolling install (binary or source); the packages are built like any other ROS 2 workspace.
+  The daemon and exporter still do not use ROS at runtime.
+- Ubuntu 26.04: `clang`, `llvm`, `libbpf-dev` (≥ 1.0), `bpftool`, `cmake`, `libyaml-dev`, `libjson-c-dev`, `libelf-dev`, `zlib1g-dev`.
+- Ubuntu 22.04 ships libbpf 0.5, which is too old: build on 24.04 or newer, use the `ros2ebpfd` container image, or build libbpf ≥ 1.3 from source first.
 
 `ros2 ebpf doctor` prints all of this for the host it runs on.
 
 ## 4. Tutorial A: host-only install
 
-Everything on one machine, no containers: ROS 2 nodes on the host, the daemon started from the
-CLI when you want statistics, Prometheus scraping it directly. The commands target Ubuntu 26.04 with ROS 2 Rolling binaries.
+Everything on one machine, no containers: ROS 2 nodes on the host, the daemon started from the CLI when you want statistics, Prometheus scraping it directly.
+The commands target Ubuntu 26.04 with ROS 2 Rolling binaries.
 
 ### 4.1 Build and install the daemon and exporter
 
@@ -132,10 +125,8 @@ colcon test --merge-install && colcon test-result --verbose
 # install/bin/{ros2ebpfd,ros2ebpf-ctl,ros2ebpf-exporter}, install/etc/ros2ebpf/*.example.yaml
 ```
 
-The repository is a colcon workspace on its own; it can equally be cloned into `src/` of an
-existing one. Binary packages come from the ROS build farm like for any ROS 2 package once the
-packages are released there (`ros-rolling-ros2ebpf-daemon`); until then the workspace `install/` is
-what runs on the host.
+The repository is a colcon workspace on its own; it can equally be cloned into `src/` of an existing one.
+Binary packages come from the ROS build farm like for any ROS 2 package once the packages are released there (`ros-rolling-ros2ebpf-daemon`); until then the workspace `install/` is what runs on the host.
 
 ### 4.2 Configure
 
@@ -153,8 +144,8 @@ shims:
   - path: /opt/ros/rolling/lib/librmw_implementation.so
 ```
 
-Leave `discover_shims: true` (the default) and ROS processes in containers are found too. Set
-`robot:` only if you do not run a collector that adds the `robot` label (§8).
+Leave `discover_shims: true` (the default) and ROS processes in containers are found too.
+Set `robot:` only if you do not run a collector that adds the `robot` label (§8).
 
 Preflight:
 
@@ -164,13 +155,10 @@ sudo install/bin/ros2ebpfd --check -c /etc/ros2ebpf/config.yaml      # config pa
 
 ### 4.3 Start it when you need it
 
-`ros2ebpfd` is not a service that runs all the time. Every probed call costs a little in the
-kernel, so you start the daemon when you want to look at the system (something is off on the
-network, a robot misbehaves) and stop it when you are done, the way `ros2 daemon` is started on
-request. `ros2 ebpf start` spawns it detached from your shell, through `sudo -n` when you are not
-root (it needs `CAP_BPF` and friends), waits until it answers on the control socket and prints a
-summary; `ros2 ebpf stop` asks it to exit. The maps stay pinned in bpffs, so counters continue
-across stop and start.
+`ros2ebpfd` is not a service that runs all the time.
+Every probed call costs a little in the kernel, so you start the daemon when you want to look at the system (something is off on the network, a robot misbehaves) and stop it when you are done, the way `ros2 daemon` is started on request.
+`ros2 ebpf start` spawns it detached from your shell, through `sudo -n` when you are not root (it needs `CAP_BPF` and friends), waits until it answers on the control socket and prints a summary; `ros2 ebpf stop` asks it to exit.
+The maps stay pinned in bpffs, so counters continue across stop and start.
 
 ```bash
 sudo -v                 # once: `ros2 ebpf start` uses `sudo -n` (or add a NOPASSWD sudoers line for install/bin/ros2ebpfd)
@@ -179,10 +167,8 @@ ros2 ebpf status
 ros2 ebpf stop
 ```
 
-The daemon hands its control socket to the user who ran `sudo` (or to the `ros2ebpf` group when
-that group exists: `sudo groupadd -f ros2ebpf && sudo usermod -aG ros2ebpf "$USER"` lets a whole
-team talk to it). `ros2 ebpf start -c FILE --log-level debug --log-file FILE` selects the config,
-the verbosity and where the output goes; `--no-sudo` when the binary already has the capabilities.
+The daemon hands its control socket to the user who ran `sudo` (or to the `ros2ebpf` group when that group exists: `sudo groupadd -f ros2ebpf && sudo usermod -aG ros2ebpf "$USER"` lets a whole team talk to it).
+`ros2 ebpf start -c FILE --log-level debug --log-file FILE` selects the config, the verbosity and where the output goes; `--no-sudo` when the binary already has the capabilities.
 
 Expected log lines (`tail ~/.ros/log/ros2ebpfd.log`):
 
@@ -198,8 +184,7 @@ I control socket at /run/ros2ebpf/control.sock (group ros2ebpf)
 I ready: 16/16 probe links attached, 1 shim(s), offset table rolling/x86_64
 ```
 
-To run in the foreground instead: `sudo install/bin/ros2ebpfd -c /etc/ros2ebpf/config.yaml --log-level debug`
-(Ctrl-C stops it; `ros2 ebpf stop` works on it too).
+To run in the foreground instead: `sudo install/bin/ros2ebpfd -c /etc/ros2ebpf/config.yaml --log-level debug` (Ctrl-C stops it; `ros2 ebpf stop` works on it too).
 
 ### 4.4 Install the CLI
 
@@ -232,8 +217,7 @@ ros2 ebpf top --once --interval 3
 curl -s localhost:9477/metrics | grep -E '^ros2_(rmw_publish_total|rmw_take_total|process_info)'
 ```
 
-Nodes that were already running before the daemon started are counted from their next call: the
-uprobe lives on the library's inode, not on a process.
+Nodes that were already running before the daemon started are counted from their next call: the uprobe lives on the library's inode, not on a process.
 
 ### 4.6 Scrape it
 
@@ -250,8 +234,7 @@ scrape_configs:
 rule_files: [/path/to/ros2ebpf/deploy/prometheus/rules/ros2.yaml]
 ```
 
-For the real per-robot collector + central server layout see §8 and
-[docs/deployment.md](docs/deployment.md).
+For the real per-robot collector + central server layout see §8 and [docs/deployment.md](docs/deployment.md).
 
 ### 4.7 Day-2 operations
 
@@ -267,9 +250,8 @@ ros2 ebpf stop && sudo rm -rf /sys/fs/bpf/ros2ebpf && ros2 ebpf start   # reset 
 
 ## 5. Tutorial B: daemon in a container, nodes anywhere
 
-This is the "prove it attaches from outside" case, and what the `images` job of CI checks on
-every commit. The daemon runs in its own container and observes ROS 2 nodes that run (a) in another
-container and (b) on the host.
+This is the "prove it attaches from outside" case, and what the `images` job of CI checks on every commit.
+The daemon runs in its own container and observes ROS 2 nodes that run (a) in another container and (b) on the host.
 
 ```bash
 docker build -f docker/Dockerfile.daemon -t ros2ebpfd:local .     # the images, on rolling binaries
@@ -297,22 +279,17 @@ docker run --rm -v ros2ebpf-run:/run/ros2ebpf ros2ebpf-cli:local ros2 ebpf top -
 docker exec ros2ebpfd ros2ebpf-ctl metrics | grep -E 'ros2_(rmw_publish_total|process_info)'
 ```
 
-The `container` label of `ros2_process_info` carries the container id, `domain_id` the per-process
-`ROS_DOMAIN_ID`, and the shim entry in `status` shows `discovered`. Two containers from the same
-image share one inode and therefore one set of probes; no double counting.
+The `container` label of `ros2_process_info` carries the container id, `domain_id` the per-process `ROS_DOMAIN_ID`, and the shim entry in `status` shows `discovered`.
+Two containers from the same image share one inode and therefore one set of probes; no double counting.
 
-CI runs this scenario on every commit (`images` job); the full end-to-end assertions (counters
-present and growing, `/rosout` excluded, identity labels, exit sweeps, enable/disable, counters
-surviving a daemon restart) run in the `rolling` job against a mainline source build, see
-[docs/testing.md](docs/testing.md).
+CI runs this scenario on every commit (`images` job); the full end-to-end assertions (counters present and growing, `/rosout` excluded, identity labels, exit sweeps, enable/disable, counters surviving a daemon restart) run in the `rolling` job against a mainline source build, see [docs/testing.md](docs/testing.md).
 
 ## 6. Configuration
 
 ### 6.1 `/etc/ros2ebpf/config.yaml` (per host)
 
 The annotated reference is [ros2ebpf_daemon/config/config.example.yaml](ros2ebpf_daemon/config/config.example.yaml).
-Keys marked *restart* are read at start only; everything else is applied by `ros2 ebpf reload`
-(or SIGHUP).
+Keys marked *restart* are read at start only; everything else is applied by `ros2 ebpf reload` (or SIGHUP).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -346,8 +323,7 @@ Keys marked *restart* are read at start only; everything else is applied by `ros
   takers: 1
 ```
 
-A property of the robot, not the host: serve it from one host of the robot (the one running the
-collector) and leave `expectations_file` pointing at a missing file on the others.
+A property of the robot, not the host: serve it from one host of the robot (the one running the collector) and leave `expectations_file` pointing at a missing file on the others.
 `ros2 ebpf expectations capture --duration 60 --takers` writes a starting point from observed rates.
 
 ### 6.3 `/etc/ros2ebpf/fleet.yaml` (CLI only)
@@ -365,8 +341,7 @@ robots:
 
 ## 7. The `ros2 ebpf` CLI
 
-Global options: `--socket PATH` (local), `--host H` (repeatable: `user@host` via ssh, `host:9478`
-via HTTP, `unix:///path`), `--robot R` with `--fleet-file`, `--format table|json`.
+Global options: `--socket PATH` (local), `--host H` (repeatable: `user@host` via ssh, `host:9478` via HTTP, `unix:///path`), `--robot R` with `--fleet-file`, `--format table|json`.
 
 | Verb | What it does |
 |---|---|
@@ -381,34 +356,25 @@ via HTTP, `unix:///path`), `--robot R` with `--fleet-file`, `--format table|json
 | `doctor [--config F] [--shim P]` | kernel, BTF, bpffs, capabilities, shim symbols, daemon, exporter |
 | `metrics [--grep S]` | the exposition, through the control socket (works in `external` mode too) |
 
-Without ROS on a host, `ros2ebpf-ctl status|enable|disable|reload|snapshot|config|metrics` does the
-same over the socket (`-q` for exit-code-only), and `ros2ebpf-ctl rpc` is the ssh transport the CLI uses.
+Without ROS on a host, `ros2ebpf-ctl status|enable|disable|reload|snapshot|config|metrics` does the same over the socket (`-q` for exit-code-only), and `ros2ebpf-ctl rpc` is the ssh transport the CLI uses.
 
 ## 8. Multi-host robots and fleets
 
-Short version; the full procedure with verification steps is in
-[docs/deployment.md](docs/deployment.md).
+Short version; the full procedure with verification steps is in [docs/deployment.md](docs/deployment.md).
 
-1. On **every host** of the robot: install `ros2ebpfd` (§4) and start it while you want
-   statistics (`ros2 ebpf start`, or the DaemonSet on a cluster). Set `host:` only if the kernel
-   hostname is not meaningful.
-2. On **one host** of the robot (usually the main computer): run the collector
-   ([deploy/alloy/config.alloy](deploy/alloy/config.alloy) or a
-   Prometheus agent) scraping `host1:9477, host2:9477, …` with `honor_labels: true`, a local WAL,
-   and `remote_write` to central with `external_labels: {robot: <name>}`. Put `expectations.yaml`
-   on this host only.
-3. **Central**: Prometheus with `--web.enable-remote-write-receiver` (or Mimir), the rules in
-   `deploy/prometheus/rules/ros2.yaml`, Alertmanager, Grafana with `deploy/grafana/`; Kubernetes
-   manifests in `deploy/k8s/central/`.
+1. On **every host** of the robot: install `ros2ebpfd` (§4) and start it while you want statistics (`ros2 ebpf start`, or the DaemonSet on a cluster).
+   Set `host:` only if the kernel hostname is not meaningful.
+2. On **one host** of the robot (usually the main computer): run the collector ([deploy/alloy/config.alloy](deploy/alloy/config.alloy) or a Prometheus agent) scraping `host1:9477, host2:9477, …` with `honor_labels: true`, a local WAL, and `remote_write` to central with `external_labels: {robot: <name>}`.
+   Put `expectations.yaml` on this host only.
+3. **Central**: Prometheus with `--web.enable-remote-write-receiver` (or Mimir), the rules in `deploy/prometheus/rules/ros2.yaml`, Alertmanager, Grafana with `deploy/grafana/`; Kubernetes manifests in `deploy/k8s/central/`.
 4. Operator shell: `fleet.yaml` (§6.3) and `ros2 ebpf status --robot amr-07`.
 
-Ports: `9477/tcp` metrics (robot LAN only), `9478/tcp` optional control HTTP (robot LAN only, no
-auth), `remote_write` outbound from the collector to central (TLS + per-robot token at the central
-ingress).
+Ports: `9477/tcp` metrics (robot LAN only), `9478/tcp` optional control HTTP (robot LAN only, no auth), `remote_write` outbound from the collector to central (TLS + per-robot token at the central ingress).
 
 ## 9. Troubleshooting
 
-Run `ros2 ebpf doctor` first. Then:
+Run `ros2 ebpf doctor` first.
+Then:
 
 | Symptom | Cause / fix |
 |---|---|
@@ -429,25 +395,21 @@ Debug logging: `ros2 ebpf config set log_level debug` (or `--log-level debug` in
 
 ## 10. Limitations
 
-- Intra-process publishes (all subscribers in the same process) bypass `rmw_publish` and are not
-  counted. Phase 2: `rclcpp_intra_publish` tracepoint.
-- Sequence-gap tracking needs an RMW that fills `publication_sequence_number` (Fast DDS, Connext)
-  and is exact only for single-publisher topics.
+- Intra-process publishes (all subscribers in the same process) bypass `rmw_publish` and are not counted.
+  Phase 2: `rclcpp_intra_publish` tracepoint.
+- Sequence-gap tracking needs an RMW that fills `publication_sequence_number` (Fast DDS, Connext) and is exact only for single-publisher topics.
 - Cross-host loss is a rate inequality over a window, not a per-message count (no shared clock).
 - `domain_id` comes from the environment only; `rcl_init` options are not visible.
 - Linux only; x86_64 and aarch64; struct offsets are ABI (table keyed by distro/arch, checked at runtime).
 - Endpoint counters live with the endpoint: a destroyed publisher's series disappears.
-- The daemon is meant to run on request, not permanently: while it runs every probed `rmw_*`
-  call pays the BPF program (§10 of docs/design.md has the cost model).
+- The daemon is meant to run on request, not permanently: while it runs every probed `rmw_*` call pays the BPF program (§10 of docs/design.md has the cost model).
 
 Details and the rationale behind each decision: [docs/design.md](docs/design.md).
 
 ## 11. Development and testing
 
-- [docs/development.md](docs/development.md): building, code layout, the map ABI contract, adding
-  probes, offsets, releasing, CI.
-- [docs/testing.md](docs/testing.md): unit tests (C and Python), the end-to-end test that CI runs
-  on every commit, and the manual multi-host test plan.
+- [docs/development.md](docs/development.md): building, code layout, the map ABI contract, adding probes, offsets, releasing, CI.
+- [docs/testing.md](docs/testing.md): unit tests (C and Python), the end-to-end test that CI runs on every commit, and the manual multi-host test plan.
 
 Everything CI does, locally, against a ROS 2 Rolling source build (privileged for the BPF programs):
 
