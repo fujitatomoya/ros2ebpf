@@ -8,6 +8,7 @@
 | `ros2ebpf_daemon/test/test_config.c` | full `config.yaml` parse, defaults, `seq_gap: all`, empty lists clearing defaults, invalid values, immutable-key diff, offset table lookup, distro-from-path, ELF symbol check | `colcon test --packages-select ros2ebpf_daemon` |
 | `ros2ebpf/test/test_api.py` | unix-socket JSON-RPC client against a fake daemon, transports from host specs, `fleet.yaml`, target resolution, table formatting, rate computation (aggregation, filters, tombstones) | `colcon test --packages-select ros2ebpf` (or `cd ros2ebpf && pytest`) |
 | `ros2ebpf/test/test_verbs.py` | config get/set on a file, value coercion, status table, ELF parser on libc and (if present) a real shim | same |
+| `ros2ebpf/test/test_monitor.py` | the `ros2 ebpf monitor` view model: rates and sparkline history, processes and health views, filter and sort, styles (gaps highlighted, idle dimmed, unhealthy red), `--once` output | same |
 | `ros2ebpf/test/test_daemon.py` | `ros2 ebpf start` / `stop`: command line (sudo or not), log file, spawn detached, wait for the socket, stop through the `stop` RPC, failure paths (exit before answering, timeout, missing binary / config), against a fake `ros2ebpfd` executable | same |
 
 `colcon test --merge-install && colcon test-result --verbose` in the workspace (the C tests go through `ament_add_test`).
@@ -27,6 +28,7 @@ Assertions on `ros2ebpf-ctl metrics`:
 - `/rosout` excluded by default;
 - `ros2_process_info` carries the pid, an `rmw_*` implementation and the domain;
 - the daemon is started with `ros2 ebpf start` and stopped with `ros2 ebpf stop` (mainline ros2cli);
+- `ros2 ebpf monitor --once` shows the talker and listener rows and the health line, and the curses UI renders `/chatter` for a few seconds under a pseudo-terminal;
 - `ros2ebpf_host_info{offset_table="rolling/…"}`;
 - `probes_attached == probes_configured`, zero name read failures;
 - short-lived client processes are swept (bounded number of process series);
