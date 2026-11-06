@@ -147,6 +147,14 @@ Releasing through bloom / the ROS build farm (`ros-<distro>-ros2ebpf-*` packages
 regenerates `deploy/k8s/central/helm/prometheusrule-ros2.yaml`. Run it after editing rules or
 dashboards and commit the result; `make lint` runs it and validates everything.
 
+## Branches
+
+`rolling` is the default and development branch; pull requests target it. `main` is a read-only
+mirror of `rolling` (`.github/workflows/mirror-rolling-to-main.yaml` force-pushes it on every push
+to `rolling`, as the ROS 2 core repositories do), so `main` is never pushed to directly. There are
+no release branches yet: the first one is created when the packages are released into a ROS
+distro, and nothing is backported before that.
+
 ## CI
 
 `.github/workflows/ci.yaml`: ROS 2 Jazzy via `ros-tooling/setup-ros`, `colcon build` + `colcon test`
