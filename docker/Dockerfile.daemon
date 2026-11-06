@@ -1,15 +1,13 @@
 # ros2ebpfd runtime image: daemon + exporter + ros2ebpf-ctl, no ROS inside.
 # Build from the repository root:  docker build -f docker/Dockerfile.daemon -t ros2ebpfd .
-# The build stage needs ament_cmake + colcon (ros-base); the runtime stage is plain Ubuntu.
+# The build stage needs ament_cmake + colcon (ros:rolling-ros-base, Ubuntu 26.04); the runtime stage is plain Ubuntu 26.04.
 ARG ROS_DISTRO=rolling
 FROM ros:${ROS_DISTRO}-ros-base AS build
 ARG ROS_DISTRO
 ENV DEBIAN_FRONTEND=noninteractive
-COPY docker/install-bpftool.sh /tmp/install-bpftool.sh
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential cmake pkg-config clang llvm libbpf-dev \
+      build-essential cmake pkg-config clang llvm libbpf-dev bpftool \
       libelf-dev zlib1g-dev libyaml-dev libjson-c-dev ros-${ROS_DISTRO}-ament-cmake \
-    && sh /tmp/install-bpftool.sh \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY ros2ebpf_exporter ros2ebpf_exporter

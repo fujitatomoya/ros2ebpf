@@ -82,8 +82,8 @@ deploy/docker-compose/    bench: daemon + Alloy + Prometheus + Alertmanager + Gr
 deploy/k8s/               robot DaemonSet + Alloy; central Prometheus/Alertmanager/Grafana (kustomize, helm values)
 deploy/prometheus/        prometheus.yml, rules/ros2.yaml (alerts), alertmanager.yml
 deploy/grafana/           provisioning + dashboards: fleet, robot, host, daemon health
-docker/                   Dockerfile.build (toolchain), .daemon, .cli, .demo
-scripts/e2e.sh            container end-to-end test
+docker/                   Dockerfile.daemon, .cli, .demo (deployment images, rolling binaries)
+scripts/github_workflows.sh   CI: rolling source build, unit tests, end-to-end (runs locally in the ros2dev container too)
 docs/                     design.md, metrics.md, deployment.md, development.md, testing.md
 ```
 
@@ -127,16 +127,16 @@ sudo apt install -y build-essential cmake pkg-config clang llvm libbpf-dev bpfto
 git clone https://github.com/fujitatomoya/ros2ebpf.git
 cd ros2ebpf
 source /opt/ros/rolling/setup.bash
-colcon build --merge-install --packages-up-to ros2ebpf_daemon    # or: make all
-colcon test --merge-install && colcon test-result --verbose      # or: make test
+colcon build --merge-install --packages-up-to ros2ebpf_daemon
+colcon test --merge-install && colcon test-result --verbose
 # install/bin/{ros2ebpfd,ros2ebpf-ctl,ros2ebpf-exporter}, install/lib/systemd/system/ros2ebpfd.service
 # (ExecStart already points at this install/), install/etc/ros2ebpf/*.example.yaml
 ```
 
 The repository is a colcon workspace on its own; it can equally be cloned into `src/` of an
-existing one. To install system-wide, build a Debian package instead (`make deb`, see
-[docs/development.md](docs/development.md)): `/usr/bin/ros2ebpfd`, `/usr/lib/systemd/system/ros2ebpfd.service`,
-`/etc/ros2ebpf/*.example.yaml`.
+existing one. Binary packages come from the ROS build farm like for any ROS 2 package once the
+packages are released there (`ros-rolling-ros2ebpf-daemon`); until then the workspace `install/` is
+what runs on the host.
 
 ### 4.2 Configure
 
@@ -168,7 +168,7 @@ sudo ros2ebpfd --check -c /etc/ros2ebpf/config.yaml      # config parses, shim e
 ```bash
 sudo groupadd -f ros2ebpf && sudo usermod -aG ros2ebpf "$USER"   # lets your user talk to the control socket
 sudo cp install/lib/systemd/system/ros2ebpfd.service /etc/systemd/system/   # ExecStart=<this clone>/install/bin/ros2ebpfd
-sudo systemctl daemon-reload                                                 # (the .deb installs the unit itself)
+sudo systemctl daemon-reload
 sudo systemctl enable --now ros2ebpfd
 sudo systemctl status ros2ebpfd --no-pager
 journalctl -u ros2ebpfd -n 20 --no-pager
@@ -195,7 +195,7 @@ To run in the foreground instead: `sudo install/bin/ros2ebpfd -c /etc/ros2ebpf/c
 The CLI is a normal ROS 2 Python package in the same workspace:
 
 ```bash
-colcon build --merge-install --packages-select ros2ebpf     # or: make cli
+colcon build --merge-install --packages-select ros2ebpf
 source install/setup.bash
 ros2 ebpf --help
 ```
@@ -302,12 +302,14 @@ Tear down: `docker compose --profile demo --profile tools down -v`.
 
 ## 6. Tutorial C: daemon in a container, nodes anywhere
 
-This is the "prove it attaches from outside" case, and what `scripts/e2e.sh` automates. The
-daemon runs in its own container and observes ROS 2 nodes that run (a) in another container and
-(b) on the host.
+This is the "prove it attaches from outside" case, and what the `images` job of CI checks on
+every commit. The daemon runs in its own container and observes ROS 2 nodes that run (a) in another
+container and (b) on the host.
 
 ```bash
-make images                                   # ros2ebpfd:local, ros2ebpf-cli:local, ros2ebpf-demo:local
+docker build -f docker/Dockerfile.daemon -t ros2ebpfd:local .     # the images, on rolling binaries
+docker build -f docker/Dockerfile.cli -t ros2ebpf-cli:local .
+docker build -f docker/Dockerfile.demo -t ros2ebpf-demo:local .
 
 # (a) ROS 2 nodes in their own container (Rolling, domain 5)
 docker run -d --name demo --network host -e ROS_DOMAIN_ID=5 ros2ebpf-demo:local
@@ -334,8 +336,10 @@ The `container` label of `ros2_process_info` carries the container id, `domain_i
 `ROS_DOMAIN_ID`, and the shim entry in `status` shows `discovered`. Two containers from the same
 image share one inode and therefore one set of probes; no double counting.
 
-`./scripts/e2e.sh` runs this scenario and asserts on the metrics (counters present and growing,
-`/rosout` excluded, identity labels, exit sweeps, enable/disable, counters surviving a daemon restart).
+CI runs this scenario on every commit (`images` job); the full end-to-end assertions (counters
+present and growing, `/rosout` excluded, identity labels, exit sweeps, enable/disable, counters
+surviving a daemon restart) run in the `rolling` job against a mainline source build, see
+[docs/testing.md](docs/testing.md).
 
 ## 7. Configuration
 
@@ -470,15 +474,15 @@ Details and the rationale behind each decision: [docs/design.md](docs/design.md)
 
 ## 12. Development and testing
 
-- [docs/development.md](docs/development.md): building natively or in the toolchain container,
-  code layout, the map ABI contract, adding probes, offsets, Debian packaging, CI.
-- [docs/testing.md](docs/testing.md): unit tests (C and Python), the container end-to-end test,
-  and the manual multi-host test plan.
+- [docs/development.md](docs/development.md): building, code layout, the map ABI contract, adding
+  probes, offsets, releasing, CI.
+- [docs/testing.md](docs/testing.md): unit tests (C and Python), the end-to-end test that CI runs
+  on every commit, and the manual multi-host test plan.
+
+Everything CI does, locally, against a ROS 2 Rolling source build (privileged for the BPF programs):
 
 ```bash
-make build-image in-docker-test     # colcon build + all unit tests inside the toolchain container (no ROS on the host)
-make images e2e                     # container end-to-end test (needs Docker, a BTF kernel, bpffs)
-make lint                           # promtool / amtool / kustomize / compose validation of deploy/
+docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh
 ```
 
 License: Apache-2.0.

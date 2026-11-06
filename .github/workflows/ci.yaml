@@ -8,16 +8,15 @@ on:
     branches: [rolling]
   workflow_dispatch:
 
-env:
-  ROS_DISTRO: rolling
-
 jobs:
   rolling:
-    name: rolling source build (colcon build + test, offsets vs mainline rmw, BPF verifier, deb)
+    name: rolling source build (colcon build + test, offsets vs mainline rmw, daemon + CLI + end-to-end on mainline)
     runs-on: ubuntu-latest
     container:
       image: tomoyafujita/ros2dev:rolling
-      options: --privileged   # bpffs mount + BPF program load for the verifier check
+      # privileged: bpffs mount + BPF program load. pid=host: the BPF programs report host-namespace
+      # pids, which the daemon resolves through /proc (same requirement as a containerised deployment).
+      options: --privileged --pid=host
       env:
         ROS_DISTRO: rolling
     steps:
@@ -29,22 +28,37 @@ jobs:
           ./scripts/github_workflows.sh
 
   images:
-    name: container images + end-to-end (rolling binaries)
+    name: container images (rolling binaries) + cross-container discovery
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - name: Build the daemon, CLI and demo images and run scripts/e2e.sh
+      - name: Build the daemon, CLI and demo images
+        run: |
+          docker build -f docker/Dockerfile.daemon -t ros2ebpfd:ci .
+          docker build -f docker/Dockerfile.cli -t ros2ebpf-cli:ci .
+          docker build -f docker/Dockerfile.demo -t ros2ebpf-demo:ci .
+          docker run --rm ros2ebpf-cli:ci ros2 ebpf --help
+      - name: Daemon in its own container discovers the demo container's shim
         run: |
           sudo mount -t bpf bpf /sys/fs/bpf || true
-          make e2e
-      - name: CLI image smoke test
-        run: docker run --rm ros2ebpf-cli:local ros2 ebpf --help
+          docker run -d --name r2e-demo --network host -e ROS_DOMAIN_ID=5 ros2ebpf-demo:ci
+          docker run -d --name r2e-daemon --pid host --privileged \
+            -v /sys/fs/bpf:/sys/fs/bpf -v /sys/kernel/btf:/sys/kernel/btf:ro -e ROS2EBPF_HOST=ci ros2ebpfd:ci
+          for i in $(seq 1 30); do docker exec r2e-daemon ros2ebpf-ctl status -q 2>/dev/null && break; sleep 1; done
+          docker logs r2e-daemon
+          docker exec r2e-daemon ros2ebpf-ctl status -q
+          sleep 5
+          docker exec r2e-daemon ros2ebpf-ctl metrics | grep -E '^ros2_rmw_publish_total\{host="ci",domain_id="5",comm="talker",topic="/chatter"\} [1-9]'
+          docker exec r2e-daemon ros2ebpf-ctl metrics | grep -E '^ros2ebpf_host_info\{.*offset_table="rolling/'
+          docker rm -f r2e-demo r2e-daemon
 
   deploy-lint:
     name: deploy manifests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: synced copies under deploy/k8s must be committed
+        run: sh deploy/k8s/sync.sh && git diff --exit-code -- deploy/k8s
       - name: promtool check rules
         run: |
           docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v3.5.0 check rules /p/rules/ros2.yaml
@@ -53,7 +67,6 @@ jobs:
         run: docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /p/alertmanager.yml
       - name: kustomize build
         run: |
-          make k8s-sync && git diff --exit-code -- deploy/k8s   # synced copies must be committed
           docker run --rm -v "$PWD/deploy:/d:ro" registry.k8s.io/kustomize/kustomize:v5.4.3 build /d/k8s/robot > /dev/null
           docker run --rm -v "$PWD/deploy:/d:ro" registry.k8s.io/kustomize/kustomize:v5.4.3 build /d/k8s/central/kustomize/plain > /dev/null
       - name: compose config

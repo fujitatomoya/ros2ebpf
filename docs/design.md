@@ -130,8 +130,8 @@ ros2ebpf/
 │   ├── k8s/                   # DaemonSet for ros2ebpfd + Alloy; central Prometheus/Alertmanager/Grafana manifests
 │   ├── prometheus/            # rules/ros2.yaml, alertmanager.yml, prometheus.yml
 │   └── grafana/               # provisioning + dashboards: fleet, robot, host, daemon health
-├── docker/                    # Dockerfile.{build,daemon,cli,demo}
-├── scripts/e2e.sh             # container end-to-end test
+├── docker/                    # Dockerfile.{daemon,cli,demo}
+├── scripts/github_workflows.sh  # CI: rolling source build, tests, end-to-end
 └── docs/
 ```
 
@@ -450,7 +450,7 @@ the multi-host robot setup, are in `README.md` and `docs/deployment.md`.
 ### 9.2 Bare-metal / systemd (the normal case on a robot)
 
 ```
-sudo apt install ./ros2ebpf-daemon_0.1.0_amd64.deb                # daemon + exporter + ros2ebpf-ctl
+sudo apt install ros-rolling-ros2ebpf-daemon                     # build farm package once released; or a colcon build
 sudo ros2 ebpf doctor                                             # kernel, bpffs, shim, offsets
 sudo editor /etc/ros2ebpf/config.yaml                             # robot name, shims, probes
 sudo systemctl enable --now ros2ebpfd

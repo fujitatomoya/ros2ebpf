@@ -9,17 +9,22 @@
 #
 # ros2ebpf follows rolling only (fujitatomoya/ros2ebpf#8): the daemon
 # probes librmw_implementation.so through struct offsets of rmw, and the
-# CLI is a ros2cli plugin. Mainline head of rmw, rmw_implementation and
-# ros2cli (with everything they need, about 140 packages) is built from
-# source here, the offset table in ros2ebpf_daemon/src/offsets.c is
+# CLI is a ros2cli plugin. Mainline head of rmw, rmw_implementation,
+# ros2cli and demo_nodes_cpp (with everything they need) is built from
+# source here; then the offset table in ros2ebpf_daemon/src/offsets.c is
 # checked against the mainline rmw headers, the daemon attaches its
-# uprobes to the mainline-built librmw_implementation.so, and `ros2 ebpf`
-# runs on the mainline ros2cli.
+# uprobes to the mainline-built librmw_implementation.so, `ros2 ebpf`
+# runs on the mainline ros2cli, and the end-to-end test runs the mainline
+# demo nodes under the daemon and asserts on the metrics.
 #
 # To avoid updating and modifying the files under `.github/workflows`,
 # this script should be adjusted accordingly, and `.github/workflows`
 # just calls this script in the workflow pipeline. The same script runs
-# locally with `make in-docker-ci`.
+# locally (privileged for the BPF programs, host pid namespace so the daemon
+# can resolve the pids the BPF programs report, as in any containerised deployment):
+#
+#   docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src \
+#     tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh
 #
 #####################################################################
 
@@ -35,6 +40,7 @@ function exit_trap() {
     # shellcheck disable=SC2317  # Don't warn about unreachable commands in this function
     if [ $? != 0 ]; then
         echo "Command [$BASH_COMMAND] is failed"
+        [ -f /tmp/ros2ebpfd.log ] && { echo "--- ros2ebpfd log (tail)"; tail -40 /tmp/ros2ebpfd.log; }
         exit 1
     fi
 }
@@ -58,7 +64,7 @@ function setup_colcon_env () {
     echo "[${FUNCNAME[0]}]: set up colcon build environment."
     mkdir -p ${COLCON_WORKSPACE}/src
     cd ${COLCON_WORKSPACE}
-    # mainline source (rmw, rmw_implementation and ros2cli with their dependencies are built below)
+    # mainline source; rmw, rmw_implementation, ros2cli and demo_nodes_cpp with their dependencies are built below
     vcs import --shallow --input https://raw.githubusercontent.com/ros2/ros2/${ROS_DISTRO}/ros2.repos src
     # move ros2ebpf directory to colcon workspace (without a previous local build)
     rm -rf ${COLCON_WORKSPACE}/src/ros2ebpf
@@ -68,12 +74,13 @@ function setup_colcon_env () {
 
 function build_colcon_package () {
     trap exit_trap ERR
-    echo "[${FUNCNAME[0]}]: build rmw, rmw_implementation, ros2cli (mainline) and the ros2ebpf packages."
+    echo "[${FUNCNAME[0]}]: build rmw, rmw_implementation, ros2cli, demo_nodes_cpp (mainline) and the ros2ebpf packages."
     cd ${COLCON_WORKSPACE}
     # ros2ebpf (the CLI) depends on ros2cli, which pulls rclpy, rcl, rmw_implementation and the
-    # RMW implementations: that is the rolling source build the daemon is tested against below.
+    # RMW implementations; demo_nodes_cpp adds rclcpp. That is the rolling source build the
+    # daemon is tested against below.
     colcon build --merge-install --event-handlers console_cohesion+ \
-        --packages-up-to rmw ${ROS2EBPF_PACKAGES} \
+        --packages-up-to rmw demo_nodes_cpp ${ROS2EBPF_PACKAGES} \
         --cmake-args -DCMAKE_BUILD_TYPE=Debug
     ./install/bin/ros2ebpfd --version
 }
@@ -109,16 +116,33 @@ function check_rmw_offsets () {
     echo "offsets for (${ROS_DISTRO}, ${arch}) match mainline rmw: ${actual}"
 }
 
-function load_bpf_objects () {
-    # The container runs privileged (see .github/workflows/ci.yaml): the daemon loads its BPF
+function start_daemon () {
+    # The container runs privileged in the host pid namespace (see .github/workflows/ci.yaml): the daemon loads its BPF
     # objects on the runner kernel (verifier check) and attaches the uprobes to the
-    # librmw_implementation.so that was just built from mainline source. Then the daemon and the
-    # `ros2 ebpf` CLI (on the mainline ros2cli) are queried through the control socket.
+    # librmw_implementation.so that was just built from mainline source.
+    trap exit_trap ERR
+    cd ${COLCON_WORKSPACE}
+    ./install/bin/ros2ebpfd -c /tmp/ci.yaml --log-level info >> /tmp/ros2ebpfd.log 2>&1 &
+    DAEMON_PID=$!
+    local i
+    for i in $(seq 1 30); do
+        if ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status -q 2>/dev/null; then
+            echo "ros2ebpfd (pid ${DAEMON_PID}) healthy after ${i}s"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "ros2ebpfd did not become healthy"
+    exit 1
+}
+
+function verify_daemon () {
     trap exit_trap ERR
     echo "[${FUNCNAME[0]}]: load the BPF objects, probe the mainline librmw_implementation.so, query the daemon."
     cd ${COLCON_WORKSPACE}
     mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
     cat > /tmp/ci.yaml <<YAML
+host: e2e
 shims:
   - path: ${COLCON_WORKSPACE}/install/lib/librmw_implementation.so
     distro: ${ROS_DISTRO}
@@ -128,9 +152,8 @@ control: {socket: /tmp/r2e.sock}
 pin_root: /sys/fs/bpf/ros2ebpf-ci
 YAML
     ./install/bin/ros2ebpfd --check -c /tmp/ci.yaml
-    timeout 20 ./install/bin/ros2ebpfd -c /tmp/ci.yaml --log-level info &
-    sleep 5
-    ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status        # exit code 1 unless healthy
+    start_daemon
+    ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status
     local metrics
     metrics=$(./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock metrics)
     echo "$metrics" | grep -E '^ros2ebpf_(build_info|map_abi|host_info|probes_attached|probes_configured)'
@@ -145,16 +168,74 @@ YAML
     # the CLI on the mainline ros2cli
     ros2 ebpf --help > /dev/null
     ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf status
-    wait || true
 }
 
-function build_debian_packages () {
+function end_to_end () {
+    # Mainline demo nodes (talker, listener, add_two_ints server + a client once per second) run
+    # under the daemon; assertions on `ros2ebpf-ctl metrics`.
     trap exit_trap ERR
-    echo "[${FUNCNAME[0]}]: build the Debian packages with cpack."
-    cd ${COLCON_WORKSPACE}/src/ros2ebpf
-    make deb BUILD=${COLCON_WORKSPACE}/deb ROS_SETUP=${COLCON_WORKSPACE}/install/setup.sh
-    dpkg-deb -c ${COLCON_WORKSPACE}/deb/pkg/ros2ebpf-daemon_*.deb | grep -E 'usr/bin/ros2ebpfd|usr/lib/systemd/system/ros2ebpfd.service|etc/ros2ebpf/config.example.yaml'
-    dpkg-deb -c ${COLCON_WORKSPACE}/deb/pkg/ros2ebpf-exporter_*.deb | grep -E 'usr/lib/libros2ebpf_exporter.a|usr/include/ros2ebpf/maps.h'
+    echo "[${FUNCNAME[0]}]: end-to-end with the mainline demo nodes."
+    cd ${COLCON_WORKSPACE}
+    local bin=${COLCON_WORKSPACE}/install/lib/demo_nodes_cpp
+    export ROS_DOMAIN_ID=5
+    $bin/talker > /dev/null 2>&1 &
+    $bin/listener > /dev/null 2>&1 &
+    $bin/add_two_ints_server > /dev/null 2>&1 &
+    ( while true; do $bin/add_two_ints_client > /dev/null 2>&1 || true; sleep 1; done ) &
+    DEMO_PIDS=$(jobs -p | grep -v "^${DAEMON_PID}$" | tr '\n' ' ')
+    sleep 10
+
+    m() { ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock metrics; }
+    val() { m | grep -F "$1" | grep -v '^#' | awk '{print $NF}' | head -1; }
+    local fail=0
+    check() {  # check <description> <grep pattern>
+        if m | grep -qE "$2"; then echo "PASS $1"; else echo "FAIL $1 (pattern: $2)"; fail=1; fi
+    }
+    check "talker publishes /chatter in domain ${ROS_DOMAIN_ID}" "^ros2_rmw_publish_total\{host=\"e2e\",domain_id=\"${ROS_DOMAIN_ID}\",comm=\"talker\",topic=\"/chatter\"\} [1-9]"
+    check "listener takes /chatter"                     "^ros2_rmw_take_total\{host=\"e2e\",domain_id=\"${ROS_DOMAIN_ID}\",comm=\"listener\",topic=\"/chatter\"\} [1-9]"
+    check "service requests on the server side"         "^ros2_rmw_service_request_total\{.*comm=\"add_two_ints_se\",service=\"/add_two_ints\",side=\"server\"\} [1-9]"
+    check "service responses on the server side"        "^ros2_rmw_service_response_total\{.*comm=\"add_two_ints_se\",service=\"/add_two_ints\",side=\"server\"\} [1-9]"
+    check "publish period histogram has samples"        "^ros2_rmw_publish_period_seconds_count\{.*comm=\"talker\",topic=\"/chatter\"\} [1-9]"
+    if m | grep -q 'topic="/rosout"'; then echo "FAIL /rosout should be excluded"; fail=1; else echo "PASS /rosout excluded"; fi
+    check "process identity"                            "^ros2_process_info\{host=\"e2e\",comm=\"talker\",pid=\"[0-9]+\",domain_id=\"${ROS_DOMAIN_ID}\",rmw=\"rmw_[a-z_]+\""
+    check "host info with the ${ROS_DISTRO} offset table" "^ros2ebpf_host_info\{.*offset_table=\"${ROS_DISTRO}/[a-z0-9_]+\""
+    local nr
+    nr=$(val 'ros2ebpf_name_read_failures_total{host="e2e"}')
+    if [ "$nr" = "0" ]; then echo "PASS no name read failures"; else echo "FAIL name read failures: $nr"; fail=1; fi
+
+    local c1 c2
+    c1=$(val 'ros2_rmw_publish_total{host="e2e",domain_id="'${ROS_DOMAIN_ID}'",comm="talker",topic="/chatter"}'); sleep 3
+    c2=$(val 'ros2_rmw_publish_total{host="e2e",domain_id="'${ROS_DOMAIN_ID}'",comm="talker",topic="/chatter"}')
+    if [ "${c2:-0}" -gt "${c1:-0}" ]; then echo "PASS counter grows ($c1 -> $c2)"; else echo "FAIL counter did not grow ($c1 -> $c2)"; fail=1; fi
+
+    # process exit sweep: short-lived add_two_ints_client pids must not accumulate
+    local procs
+    procs=$(m | grep -c '^ros2_process_info' || true)
+    if [ "$procs" -le 8 ]; then echo "PASS exited processes are swept ($procs process series)"; else echo "FAIL $procs process series: exit sweep not working"; fail=1; fi
+
+    # enable / disable round trip through the control socket
+    ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock disable take > /dev/null
+    if ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status | tr -d ' \n' | grep -q '"take":{"configured":false,"enabled":false'; then echo "PASS disable take -> family off"; else echo "FAIL disable take"; fail=1; fi
+    ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status -q && echo "PASS status stays healthy (family no longer requested)" || { echo "FAIL healthy after disable"; fail=1; }
+    ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock enable take > /dev/null
+    if ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status | tr -d ' \n' | grep -q '"take":{"configured":true,"enabled":true,"attached":2,"expected":2'; then echo "PASS enable take -> 2/2 links"; else echo "FAIL re-enable take"; fail=1; fi
+
+    # restart: counters survive through the pinned maps
+    local before after
+    before=$(val 'ros2_rmw_publish_total{host="e2e",domain_id="'${ROS_DOMAIN_ID}'",comm="talker",topic="/chatter"}')
+    kill -TERM ${DAEMON_PID}; wait ${DAEMON_PID} || true
+    start_daemon; sleep 3
+    after=$(val 'ros2_rmw_publish_total{host="e2e",domain_id="'${ROS_DOMAIN_ID}'",comm="talker",topic="/chatter"}')
+    if [ "${after:-0}" -ge "${before:-1}" ]; then echo "PASS counters survived daemon restart ($before -> $after)"; else echo "FAIL counters reset on restart ($before -> $after)"; fail=1; fi
+
+    # the CLI against the running daemon
+    ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf status
+    ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf top --once
+
+    kill ${DEMO_PIDS} ${DAEMON_PID} 2>/dev/null || true
+    pkill -f demo_nodes_cpp 2>/dev/null || true
+    wait 2>/dev/null || true
+    if [ "$fail" = 0 ]; then echo "e2e: all checks passed"; else echo "e2e: FAILED"; exit 1; fi
 }
 
 ########
@@ -178,7 +259,7 @@ setup_colcon_env
 build_colcon_package
 test_colcon_package
 check_rmw_offsets
-load_bpf_objects
-build_debian_packages
+verify_daemon
+end_to_end
 
 exit 0

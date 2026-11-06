@@ -9,30 +9,39 @@
 | `ros2ebpf/test/test_api.py` | unix-socket JSON-RPC client against a fake daemon, transports from host specs, `fleet.yaml`, target resolution, table formatting, rate computation (aggregation, filters, tombstones) | `colcon test --packages-select ros2ebpf` (or `cd ros2ebpf && pytest`) |
 | `ros2ebpf/test/test_verbs.py` | config get/set on a file, value coercion, status table, ELF parser on libc and (if present) a real shim | same |
 
-`make test cli-test` or `make in-docker-test`; `colcon test-result --verbose` prints the results
-(the C tests go through `ament_add_test`). `make in-docker-ci` runs the whole CI script against a
-Rolling source build (tests, flake8, offset table vs. mainline `rmw`, BPF verifier check, deb).
+`colcon test --merge-install && colcon test-result --verbose` in the workspace (the C tests go
+through `ament_add_test`). The whole CI script, including the end-to-end test below, runs locally
+with `docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src tomoyafujita/ros2dev:rolling
+./scripts/github_workflows.sh`.
 
-## 2. Container end-to-end (`scripts/e2e.sh`, `make e2e`)
+## 2. End-to-end (CI, every commit)
 
-Needs Docker, a kernel with BTF, bpffs. No ROS on the host.
+`end_to_end` in `scripts/github_workflows.sh`, in the `rolling` job of `.github/workflows/ci.yaml`
+(privileged `tomoyafujita/ros2dev:rolling` container in the host pid namespace, so the BPF programs
+load on the runner kernel and the daemon can resolve the pids they report). Everything is built from mainline source first (section 1).
 
-Scenario: `ros2ebpf-demo:local` (ROS 2 Rolling: `talker`, `listener`, `add_two_ints_server`, a
-client every second, domain 5) in one container; `ros2ebpfd:local` in another with `--pid host
---privileged`, no config file. Assertions on `ros2ebpf-ctl metrics`:
+Scenario: the daemon with a static shim on the mainline-built `librmw_implementation.so`
+(`offset table rolling/<arch>`); the mainline `demo_nodes_cpp` `talker`, `listener`,
+`add_two_ints_server` and a client every second in domain 5, in the same container. Assertions on
+`ros2ebpf-ctl metrics`:
 
 - publish / take counters for `/chatter` with `host`, `domain_id=5`, `comm`, growing over 3 s;
 - service request and response counters on the server side;
 - publish-period histogram populated;
 - `/rosout` excluded by default;
-- `ros2_process_info` carries the container id, an `rmw_*` implementation and the domain;
-- `ros2ebpf_host_info{offset_table="rolling/…"}` (shim discovered through `/proc`);
+- `ros2_process_info` carries the pid, an `rmw_*` implementation and the domain;
+- `ros2ebpf_host_info{offset_table="rolling/…"}`;
 - `probes_attached == probes_configured`, zero name read failures;
 - short-lived client processes are swept (bounded number of process series);
 - `disable take` turns the family off and `status -q` stays 0; `enable take` re-attaches 2/2 links;
-- counters survive `docker restart` of the daemon (pinned maps).
+- counters survive a restart of the daemon (pinned maps);
+- `ros2 ebpf status` and `ros2 ebpf top --once` (mainline ros2cli) against the daemon.
 
-Last verified run (Ubuntu 24.04 host, kernel 7.0, ROS 2 Rolling demo image on Ubuntu 26.04):
+The `images` job covers the cross-container case of README tutorial C: `ros2ebpfd:ci` with
+`--pid host --privileged` and no config discovers the shim of the `ros2ebpf-demo:ci` container
+through `/proc/<pid>/root` and counts its talker.
+
+Last verified run (Ubuntu 24.04 host, kernel 7.0, ros2dev:rolling container, mainline source):
 
 ```
 PASS talker publishes /chatter in domain 5
@@ -41,21 +50,17 @@ PASS service requests on the server side
 PASS service responses on the server side
 PASS publish period histogram has samples
 PASS /rosout excluded
-PASS process identity with container id
-PASS host info with discovered offset table
-PASS probes attached == configured (16)
+PASS process identity
+PASS host info with the rolling offset table
 PASS no name read failures
 PASS counter grows (9 -> 12)
-PASS exited processes are swept (4 process series)
+PASS exited processes are swept (3 process series)
 PASS disable take -> family off
 PASS status stays healthy (family no longer requested)
 PASS enable take -> 2/2 links
-PASS counters survived daemon restart (12 -> 18)
+PASS counters survived daemon restart (13 -> 17)
 e2e: all checks passed
 ```
-
-The CLI image was exercised against the same daemon: `ros2 ebpf status -v`, `top --once`,
-`doctor`, `config show`, `metrics --grep`, `expectations capture --takers`.
 
 ## 3. Host-only check (needs root on a ROS 2 host)
 

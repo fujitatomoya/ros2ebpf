@@ -24,9 +24,9 @@ Repeat on each host (`main`, `perception`, `arm` …). Hosts may run different R
 CPU architectures; each daemon exports what it found in `ros2ebpf_host_info`.
 
 ```bash
-# install: a .deb built on a matching arch (make deb), or the container image
-sudo apt install ./ros2ebpf-daemon_0.1.0_amd64.deb        # or _arm64.deb
-sudo cp /etc/ros2ebpf/config.example.yaml /etc/ros2ebpf/config.yaml      # (install/etc/ros2ebpf/ for a colcon build)
+# install: a colcon build of this repository (README 4.1), the container image, or the
+# ros-rolling-ros2ebpf-daemon package once the packages are released to the ROS build farm
+sudo mkdir -p /etc/ros2ebpf && sudo cp install/etc/ros2ebpf/config.example.yaml /etc/ros2ebpf/config.yaml
 sudoedit /etc/ros2ebpf/config.yaml
 ```
 
