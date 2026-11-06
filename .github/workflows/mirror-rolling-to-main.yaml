@@ -1,0 +1,17 @@
+# rolling is the development branch; main is a read-only mirror of it (same convention as the
+# ROS 2 core repositories). Every push to rolling force-pushes main to the same commit.
+name: Mirror rolling to main
+
+on:
+  push:
+    branches: [ rolling ]
+
+jobs:
+  mirror-to-main:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the default GITHUB_TOKEN of this repository is read-only
+    steps:
+    - uses: zofrex/mirror-branch@v1
+      with:
+        target-branch: main
