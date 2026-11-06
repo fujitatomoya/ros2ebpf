@@ -10,21 +10,16 @@
 | `ros2ebpf/test/test_verbs.py` | config get/set on a file, value coercion, status table, ELF parser on libc and (if present) a real shim | same |
 | `ros2ebpf/test/test_daemon.py` | `ros2 ebpf start` / `stop`: command line (sudo or not), log file, spawn detached, wait for the socket, stop through the `stop` RPC, failure paths (exit before answering, timeout, missing binary / config), against a fake `ros2ebpfd` executable | same |
 
-`colcon test --merge-install && colcon test-result --verbose` in the workspace (the C tests go
-through `ament_add_test`). The whole CI script, including the end-to-end test below, runs locally
-with `docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src tomoyafujita/ros2dev:rolling
-./scripts/github_workflows.sh`.
+`colcon test --merge-install && colcon test-result --verbose` in the workspace (the C tests go through `ament_add_test`).
+The whole CI script, including the end-to-end test below, runs locally with `docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh`.
 
 ## 2. End-to-end (CI, every commit)
 
-`end_to_end` in `scripts/github_workflows.sh`, in the `rolling` job of `.github/workflows/ci.yaml`
-(privileged `tomoyafujita/ros2dev:rolling` container in the host pid namespace, so the BPF programs
-load on the runner kernel and the daemon can resolve the pids they report). Everything is built from mainline source first (section 1).
+`end_to_end` in `scripts/github_workflows.sh`, in the `rolling` job of `.github/workflows/ci.yaml` (privileged `tomoyafujita/ros2dev:rolling` container in the host pid namespace, so the BPF programs load on the runner kernel and the daemon can resolve the pids they report).
+Everything is built from mainline source first (section 1).
 
-Scenario: the daemon with a static shim on the mainline-built `librmw_implementation.so`
-(`offset table rolling/<arch>`); the mainline `demo_nodes_cpp` `talker`, `listener`,
-`add_two_ints_server` and a client every second in domain 5, in the same container. Assertions on
-`ros2ebpf-ctl metrics`:
+Scenario: the daemon with a static shim on the mainline-built `librmw_implementation.so` (`offset table rolling/<arch>`); the mainline `demo_nodes_cpp` `talker`, `listener`, `add_two_ints_server` and a client every second in domain 5, in the same container.
+Assertions on `ros2ebpf-ctl metrics`:
 
 - publish / take counters for `/chatter` with `host`, `domain_id=5`, `comm`, growing over 3 s;
 - service request and response counters on the server side;
@@ -39,9 +34,7 @@ Scenario: the daemon with a static shim on the mainline-built `librmw_implementa
 - counters survive `ros2 ebpf stop` + `ros2 ebpf start` (pinned maps);
 - `ros2 ebpf status` and `ros2 ebpf top --once` (mainline ros2cli) against the daemon.
 
-The `images` job covers the cross-container case of README tutorial C: `ros2ebpfd:ci` with
-`--pid host --privileged` and no config discovers the shim of the `ros2ebpf-demo:ci` container
-through `/proc/<pid>/root` and counts its talker.
+The `images` job covers the cross-container case of README tutorial C: `ros2ebpfd:ci` with `--pid host --privileged` and no config discovers the shim of the `ros2ebpf-demo:ci` container through `/proc/<pid>/root` and counts its talker.
 
 Last verified run (Ubuntu 24.04 host, kernel 7.0, ros2dev:rolling container, mainline source):
 
@@ -75,15 +68,11 @@ curl -s localhost:9477/metrics | grep chatter
 ros2 ebpf stop
 ```
 
-Expect `16/16 probe links` (one shim) and `ros2_rmw_publish_total{...topic="/chatter"}`; the daemon
-log is in `~/.ros/log/ros2ebpfd.log`.
+Expect `16/16 probe links` (one shim) and `ros2_rmw_publish_total{...topic="/chatter"}`; the daemon log is in `~/.ros/log/ros2ebpfd.log`.
 
 ## 4. Multi-host test plan (manual)
 
-Prerequisites: two or more hosts on one LAN, `ros2ebpfd` on each (package or container), a
-collector on one of them, a central Prometheus with the remote-write receiver enabled
-(`deploy/k8s/central/`, or any `prometheus --web.enable-remote-write-receiver` on a laptop; point
-the collector's `REMOTE_WRITE_URL` at `http://<laptop>:9090/api/v1/write`).
+Prerequisites: two or more hosts on one LAN, `ros2ebpfd` on each (package or container), a collector on one of them, a central Prometheus with the remote-write receiver enabled (`deploy/k8s/central/`, or any `prometheus --web.enable-remote-write-receiver` on a laptop; point the collector's `REMOTE_WRITE_URL` at `http://<laptop>:9090/api/v1/write`).
 
 | # | Step | Expected |
 |---|---|---|
@@ -101,5 +90,4 @@ the collector's `REMOTE_WRITE_URL` at `http://<laptop>:9090/api/v1/write`).
 | 12 | two robots with the same domain id and topic names | `Ros2DomainShared` (info) fires; dashboards still separate them by `robot` |
 | 13 | upgrade the daemon package on one host | if the map ABI changed: one reset, log line `recreating`; otherwise counters continue |
 
-Record the outcome per row with the Prometheus query used; failures in rows 3–5 point at the
-probe/offset layer, 6 at the CLI/transport, 7–10 at rules/collector, 11–13 at packaging.
+Record the outcome per row with the Prometheus query used; failures in rows 3–5 point at the probe/offset layer, 6 at the CLI/transport, 7–10 at rules/collector, 11–13 at packaging.

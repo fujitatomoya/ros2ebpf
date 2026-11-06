@@ -4,31 +4,26 @@ Design note, rev. 4 — 2026-11-04.
 
 - rev. 1 (2026-10-07): initial design.
 - rev. 2 (2026-11-04): multi-host / multi-robot identity (`host`, `machine_id`, `robot`, `domain_id`).
-- rev. 3 (2026-11-04): restructured around the project's components — `ros2 ebpf` CLI, `ros2ebpfd`
-  daemon, statistics exporter (placement decided in §5), Prometheus / Alertmanager — with repository
-  layout, interfaces between components, and the deployment procedures (hosts and Kubernetes).
-- rev. 4 (2026-11-04): implementation notes (§13) recording where the first implementation deviates
-  from or refines rev. 3, after the end-to-end run against ROS 2 Jazzy nodes in a container.
+- rev. 3 (2026-11-04): restructured around the project's components — `ros2 ebpf` CLI, `ros2ebpfd` daemon, statistics exporter (placement decided in §5), Prometheus / Alertmanager — with repository layout, interfaces between components, and the deployment procedures (hosts and Kubernetes).
+- rev. 4 (2026-11-04): implementation notes (§13) recording where the first implementation deviates from or refines rev. 3, after the end-to-end run against ROS 2 Jazzy nodes in a container.
 
 ## 1. Motivation
 
-- `rclcpp` topic statistics is being removed from mainline (ros2/rclcpp#3203, with companion removals
-  of `libstatistics_collector` and the demo). The ROSCon decision was to remove it entirely and rely
-  on tooling that hooks into tracepoints.
+- `rclcpp` topic statistics is being removed from mainline (ros2/rclcpp#3203, with companion removals of `libstatistics_collector` and the demo).
+  The ROSCon decision was to remove it entirely and rely on tooling that hooks into tracepoints.
 - Tracing (ros2_tracing / LTTng) and statistics are different problems:
-  - Tracing records every event into a ring buffer; a consumer chain
-    (`lttng-consumerd` → CTF → babeltrace → analysis) is required before a number exists. Every
-    stage scales with event rate. Good for post-hoc analysis, wrong shape for always-on metrics.
-  - Statistics need aggregation at the hook and a tiny, bounded export. This is exactly the eBPF
-    model: the probe program aggregates into BPF maps in kernel context, and user space only reads
-    the maps at scrape time.
+  - Tracing records every event into a ring buffer; a consumer chain (`lttng-consumerd` → CTF → babeltrace → analysis) is required before a number exists.
+    Every stage scales with event rate.
+    Good for post-hoc analysis, wrong shape for always-on metrics.
+  - Statistics need aggregation at the hook and a tiny, bounded export.
+    This is exactly the eBPF model: the probe program aggregates into BPF maps in kernel context, and user space only reads the maps at scrape time.
 - Operators need to detect, with Prometheus + Alertmanager:
   - publish / take / service call frequency per endpoint, per host, per robot
   - message drops, where they are observable, including loss between hosts of one robot
   - without changing or restarting application code, against shipped Debian binaries.
-- ROS 2 is distributed. A robot is usually several Linux hosts, a fleet may share a domain ID, and an
-  eBPF probe only sees the kernel it is loaded into. Any metric that cannot say which machine it came
-  from is ambiguous as soon as there is more than one.
+- ROS 2 is distributed.
+  A robot is usually several Linux hosts, a fleet may share a domain ID, and an eBPF probe only sees the kernel it is loaded into.
+  Any metric that cannot say which machine it came from is ambiguous as soon as there is more than one.
 
 ## 2. Requirements
 
@@ -49,8 +44,8 @@ Design note, rev. 4 — 2026-11-04.
 
 ## 3. Components and architecture
 
-The project has four components. Two are built here, one is a thin layer whose placement is decided in
-§5, and one is upstream software used as-is with a documented setup.
+The project has four components.
+Two are built here, one is a thin layer whose placement is decided in §5, and one is upstream software used as-is with a documented setup.
 
 | Component | What it is | Runs where | Language / form |
 |---|---|---|---|
@@ -59,7 +54,9 @@ The project has four components. Two are built here, one is a thin layer whose p
 | **Statistics exporter** (`ros2ebpf_exporter`) | turns BPF map contents into Prometheus exposition (and other formats later) | in-process inside `ros2ebpfd` by default; separable (§5) | C library + optional standalone binary |
 | **Prometheus / Alertmanager / Grafana** | storage, rate computation, alerting, dashboards | per-robot collector + central server | upstream, unmodified; config and manifests in `deploy/` |
 
-Deployment unit: **host**. Aggregation unit: **robot**. Correlation scope: **(robot, domain_id)**.
+Deployment unit: **host**.
+Aggregation unit: **robot**.
+Correlation scope: **(robot, domain_id)**.
 
 ```mermaid
 flowchart LR
@@ -134,9 +131,8 @@ ros2ebpf/
 └── docs/
 ```
 
-`ros2ebpf_daemon` and `ros2ebpf_exporter` have no dependency on a ROS 2 installation: they are plain
-Debian packages (`ros2ebpf-daemon`, `ros2ebpf-exporter`) that can be installed on a host with only the
-shipped ROS binaries. `ros2ebpf` (CLI) is a normal ROS 2 package released through the buildfarm.
+`ros2ebpf_daemon` and `ros2ebpf_exporter` have no dependency on a ROS 2 installation: they are plain Debian packages (`ros2ebpf-daemon`, `ros2ebpf-exporter`) that can be installed on a host with only the shipped ROS binaries.
+`ros2ebpf` (CLI) is a normal ROS 2 package released through the buildfarm.
 
 ### 3.2 Interfaces between components
 
@@ -155,26 +151,20 @@ shipped ROS binaries. `ros2ebpf` (CLI) is a normal ROS 2 package released throug
 ### 4.1 Responsibilities
 
 - Not a ROS node: no rclpy, no DDS participant, no sourced workspace at runtime.
-- Inputs: zero or more shim paths (`librmw_implementation.so`), a per-(distro, arch) struct offset
-  table, `/etc/ros2ebpf/config.yaml`.
-- **Attach**: resolves symbols to inode+offset (PID-independent, so processes started later are
-  covered), verifies that the ELF exports the expected `rmw_*` symbols, and attaches `rmw_*`
-  uprobes/uretprobes, `rmw_destroy_*` cleanup probes, `sched_process_exit`, and the UDP drop
-  tracepoint. Shims used by containers are discovered through `/proc/<pid>/maps` (§13).
-- **Maps**: pinned under `/sys/fs/bpf/ros2ebpf/` so counters survive daemon restarts and so a
-  separate reader can open them.
+- Inputs: zero or more shim paths (`librmw_implementation.so`), a per-(distro, arch) struct offset table, `/etc/ros2ebpf/config.yaml`.
+- **Attach**: resolves symbols to inode+offset (PID-independent, so processes started later are covered), verifies that the ELF exports the expected `rmw_*` symbols, and attaches `rmw_*` uprobes/uretprobes, `rmw_destroy_*` cleanup probes, `sched_process_exit`, and the UDP drop tracepoint.
+  Shims used by containers are discovered through `/proc/<pid>/maps` (§13).
+- **Maps**: pinned under `/sys/fs/bpf/ros2ebpf/` so counters survive daemon restarts and so a separate reader can open them.
 - **Identity** (§4.3): host-level facts once at start, per-process facts once per PID.
-- **Control**: unix-socket RPC for the CLI; SIGHUP reloads config (filters, expectations) without
-  detaching; enabling/disabling a probe family at runtime attaches/detaches links, maps stay.
+- **Control**: unix-socket RPC for the CLI; SIGHUP reloads config (filters, expectations) without detaching; enabling/disabling a probe family at runtime attaches/detaches links, maps stay.
 - **Export**: runs the exporter module in-process by default (§5).
 - Idle between scrapes; no polling of maps.
 
 ### 4.2 Why the rmw shim
 
-`librcl.so` links to `librmw_implementation.so`, which exports every `rmw_*` symbol and forwards to
-the loaded vendor library. One probe per symbol therefore covers all RMW implementations and all
-client libraries (rclcpp, rclpy, rclrs). The first argument of each call is a public `rmw/types.h`
-struct carrying the name:
+`librcl.so` links to `librmw_implementation.so`, which exports every `rmw_*` symbol and forwards to the loaded vendor library.
+One probe per symbol therefore covers all RMW implementations and all client libraries (rclcpp, rclpy, rclrs).
+The first argument of each call is a public `rmw/types.h` struct carrying the name:
 
 | Symbol | arg0 type | name field |
 |--------|-----------|------------|
@@ -184,10 +174,8 @@ struct carrying the name:
 | `rmw_take_request`, `rmw_send_response` | `rmw_service_t *` | `service_name` |
 | `rmw_destroy_publisher` / `rmw_destroy_subscription` / ... | handle is **arg1** (arg0 is the node) | cleanup |
 
-Offsets are ABI, verified per (distro, arch) at build (`offsets/gen.sh`) and at runtime (the probe also
-reads `implementation_identifier` from offset 0 of every handle; a value not starting with `rmw_`
-is reported as `ros2ebpf_unknown_rmw_processes`). Mixed fleets are the norm, so the table is keyed
-by both and the daemon exports which entry it used.
+Offsets are ABI, verified per (distro, arch) at build (`offsets/gen.sh`) and at runtime (the probe also reads `implementation_identifier` from offset 0 of every handle; a value not starting with `rmw_` is reported as `ros2ebpf_unknown_rmw_processes`).
+Mixed fleets are the norm, so the table is keyed by both and the daemon exports which entry it used.
 
 ### 4.3 Host, robot and domain identity
 
@@ -198,14 +186,10 @@ by both and the daemon exports which entry it used.
 | `robot` | the physical unit operators reason about | operator config | collector `remote_write` external label (fallback: `robot:` in daemon config) |
 | `domain_id` | the ROS 2 graph the process is part of | per process | daemon, on every endpoint series |
 
-Per-process facts are resolved once per PID (the BPF program pushes unseen PIDs to a ring buffer, the
-daemon reads `/proc/<pid>/{comm,environ,cgroup,stat}` off the hot path) and dropped on
-`sched_process_exit`: `comm`, `domain_id` (`ROS_DOMAIN_ID`, default `0`, `unknown` if `environ` is
-unreadable), `rmw` (`RMW_IMPLEMENTATION`, or the shim's identifier read by the probe),
-`localhost_only`, `container` (from the cgroup path). Reading `environ` needs `PTRACE_MODE_READ`,
-hence `CAP_SYS_PTRACE` in the unit file. Containerised nodes have their shim resolved through
-`/proc/<pid>/root`. Every host keeps its own monotonic clock; cross-host correlation is done on
-rates over the same window, never on timestamps.
+Per-process facts are resolved once per PID (the BPF program pushes unseen PIDs to a ring buffer, the daemon reads `/proc/<pid>/{comm,environ,cgroup,stat}` off the hot path) and dropped on `sched_process_exit`: `comm`, `domain_id` (`ROS_DOMAIN_ID`, default `0`, `unknown` if `environ` is unreadable), `rmw` (`RMW_IMPLEMENTATION`, or the shim's identifier read by the probe), `localhost_only`, `container` (from the cgroup path).
+Reading `environ` needs `PTRACE_MODE_READ`, hence `CAP_SYS_PTRACE` in the unit file.
+Containerised nodes have their shim resolved through `/proc/<pid>/root`.
+Every host keeps its own monotonic clock; cross-host correlation is done on rates over the same window, never on timestamps.
 
 ### 4.4 Data flow for one `rmw_publish`
 
@@ -236,16 +220,12 @@ sequenceDiagram
     Note over P: collector adds robot=… on remote_write
 ```
 
-Key properties: the name read happens once per publisher, the `/proc` read once per PID; counters
-are updated with atomic adds; `rmw_destroy_*` deletes keys in the probe and `sched_process_exit`
-triggers a user-space sweep; topic filters are applied in the BPF program (hashed exclude list,
-evaluated at first sight and stored as a flag) so excluded topics cost one hash lookup and nothing
-more.
+Key properties: the name read happens once per publisher, the `/proc` read once per PID; counters are updated with atomic adds; `rmw_destroy_*` deletes keys in the probe and `sched_process_exit` triggers a user-space sweep; topic filters are applied in the BPF program (hashed exclude list, evaluated at first sight and stored as a flag) so excluded topics cost one hash lookup and nothing more.
 
 ## 5. Statistics exporter: placement decision
 
-The question is whether "turn maps into Prometheus text" is part of the daemon or a separate
-component. Considerations:
+The question is whether "turn maps into Prometheus text" is part of the daemon or a separate component.
+Considerations:
 
 | | In-process (exporter module linked into `ros2ebpfd`) | Separate process (`ros2ebpf-exporter` reading pinned maps) |
 |---|---|---|
@@ -256,30 +236,25 @@ component. Considerations:
 | Operational surface | one unit, one port, one config | two units to keep in sync; CLI `status` must check both |
 | Scrape cost | reads maps directly | same, through the pinned fds |
 
-**Decision.** The exporter is a **library with a stable input contract** (the pinned map layout in
-`ros2ebpf/maps.h` plus the pinned `processes` map), shipped as its own package `ros2ebpf_exporter`,
-and the daemon **links it in and serves `/metrics` itself by default**. Reasons:
+**Decision.**
+The exporter is a **library with a stable input contract** (the pinned map layout in `ros2ebpf/maps.h` plus the pinned `processes` map), shipped as its own package `ros2ebpf_exporter`, and the daemon **links it in and serves `/metrics` itself by default**.
+Reasons:
 
 1. A separate process does not actually reduce privilege: opening a pinned map needs `CAP_BPF`.
 2. One privileged process is what operators have to reason about on 30+ hosts; two is worse.
 3. The identity join is cheap in-process and awkward over IPC.
 
-What the split still buys is kept by making the contract explicit: the daemon pins the identity table
-as a BPF map alongside the counters, so `ros2ebpf-exporter` can also run standalone
-(`exporter: {mode: external}` in config disables the in-process HTTP server) for cases that need it:
-an OTLP or ROS-topic sink, a hardened host where the HTTP listener must run as a different user, or
-debugging the daemon without a collector. The CLI's `status` reports which mode is active and whether
-the exporter endpoint answers.
+What the split still buys is kept by making the contract explicit: the daemon pins the identity table as a BPF map alongside the counters, so `ros2ebpf-exporter` can also run standalone (`exporter: {mode: external}` in config disables the in-process HTTP server) for cases that need it: an OTLP or ROS-topic sink, a hardened host where the HTTP listener must run as a different user, or debugging the daemon without a collector.
+The CLI's `status` reports which mode is active and whether the exporter endpoint answers.
 
-Implementation rule that follows: **the daemon never computes a rate**. Counters are monotonic, the
-scrape interval sets the time resolution, `rate()` is server-side and re-windowable. The exporter is a
-pure map-to-text transform; everything derived lives in Prometheus.
+Implementation rule that follows: **the daemon never computes a rate**.
+Counters are monotonic, the scrape interval sets the time resolution, `rate()` is server-side and re-windowable.
+The exporter is a pure map-to-text transform; everything derived lives in Prometheus.
 
 ## 6. `ros2 ebpf` CLI
 
-A `ros2cli` command extension (`ros2 ebpf`), installed like `ros2 topic` or `ros2 node`. It talks to
-the daemon over the control socket and never to DDS, so it works even when no ROS process is running
-and does not create a participant.
+A `ros2cli` command extension (`ros2 ebpf`), installed like `ros2 topic` or `ros2 node`.
+It talks to the daemon over the control socket and never to DDS, so it works even when no ROS process is running and does not create a participant.
 
 | Verb | Effect |
 |---|---|
@@ -292,19 +267,15 @@ and does not create a participant.
 | `ros2 ebpf doctor` | checks kernel version, BTF, bpffs, capabilities, shim symbols, daemon and exporter reachability; prints what would fail at attach |
 | `ros2 ebpf metrics [--grep S]` | the exposition the daemon would serve, through the control socket |
 
-`--robot R` fans out to every host listed under that robot in `/etc/ros2ebpf/fleet.yaml` and prints a
-merged table. `--host` accepts ssh targets (`user@host`), `host:9478` (HTTP control) and
-`unix:///path`. Output is tabular by default and `--format json` for scripting; `status` exit code is
-non-zero when any probe family requested in config is not attached, so it can be used as a readiness
-check (`ros2ebpf-ctl status -q` does the same without ROS, for container probes).
+`--robot R` fans out to every host listed under that robot in `/etc/ros2ebpf/fleet.yaml` and prints a merged table.
+`--host` accepts ssh targets (`user@host`), `host:9478` (HTTP control) and `unix:///path`.
+Output is tabular by default and `--format json` for scripting; `status` exit code is non-zero when any probe family requested in config is not attached, so it can be used as a readiness check (`ros2ebpf-ctl status -q` does the same without ROS, for container probes).
 
 ## 7. Metrics
 
-Label contract: `robot` (collector) and `host` (daemon) on everything; `domain_id` and `comm` on all
-endpoint series; `topic` / `service` fully expanded as seen by rmw; `rmw` optional (off by default,
-cardinality). **No `pid` and no `machine_id` on counters**: both live in `_info` series and are
-joined with `group_left`. Endpoints sharing a label set (two publishers of one topic in one process,
-two processes with the same `comm`) are summed by the exporter.
+Label contract: `robot` (collector) and `host` (daemon) on everything; `domain_id` and `comm` on all endpoint series; `topic` / `service` fully expanded as seen by rmw; `rmw` optional (off by default, cardinality).
+**No `pid` and no `machine_id` on counters**: both live in `_info` series and are joined with `group_left`.
+Endpoints sharing a label set (two publishers of one topic in one process, two processes with the same `comm`) are summed by the exporter.
 
 | Metric | Type | Source |
 |--------|------|--------|
@@ -386,7 +357,8 @@ remote_write:
 
 ### 8.3 Alert rules (fleet-wide)
 
-Shipped as `deploy/prometheus/rules/ros2.yaml`; loaded by the central Prometheus. The core rules:
+Shipped as `deploy/prometheus/rules/ros2.yaml`; loaded by the central Prometheus.
+The core rules:
 
 ```yaml
 groups:
@@ -430,29 +402,23 @@ groups:
 
 ## 9. Deployment
 
-The reference deployment lives in `deploy/` (Kubernetes, plus the Alloy collector configuration
-for a plain host). It uses upstream images for Prometheus, Alertmanager, Grafana and Alloy without
-modification; only configuration is ours. The full procedures, including
-the multi-host robot setup, are in `README.md` and `docs/deployment.md`.
+The reference deployment lives in `deploy/` (Kubernetes, plus the Alloy collector configuration for a plain host).
+It uses upstream images for Prometheus, Alertmanager, Grafana and Alloy without modification; only configuration is ours.
+The full procedures, including the multi-host robot setup, are in `README.md` and `docs/deployment.md`.
 
 ### 9.1 Requirements on every probed host
 
-- Linux ≥ 5.8 (`CAP_BPF`, ring buffer), BTF available (`/sys/kernel/btf/vmlinux`) for CO-RE and
-  `tp_btf` tracepoints; the `ros2 ebpf doctor` verb checks this.
+- Linux ≥ 5.8 (`CAP_BPF`, ring buffer), BTF available (`/sys/kernel/btf/vmlinux`) for CO-RE and `tp_btf` tracepoints; the `ros2 ebpf doctor` verb checks this.
 - bpffs mounted at `/sys/fs/bpf`.
-- ROS 2 binaries installed from Debian packages (the offset table is keyed on the distro's shipped
-  `librmw_implementation.so`; a from-source build needs its own row, generated with
-  `ros2ebpf_daemon/offsets/gen.sh`).
-- Capabilities for `ros2ebpfd`: `CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_PTRACE` (identity), and
-  `CAP_SYS_RESOURCE` if the map memlock limit is raised. Running as root is the simple alternative;
-  never as a ROS user.
+- ROS 2 binaries installed from Debian packages (the offset table is keyed on the distro's shipped `librmw_implementation.so`; a from-source build needs its own row, generated with `ros2ebpf_daemon/offsets/gen.sh`).
+- Capabilities for `ros2ebpfd`: `CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_PTRACE` (identity), and `CAP_SYS_RESOURCE` if the map memlock limit is raised.
+  Running as root is the simple alternative; never as a ROS user.
 
 ### 9.2 Bare-metal, on demand (the normal case on a robot)
 
-The daemon is not a permanent service. Probing costs a little on every `rmw_*` call (§10), and the
-use cases are investigative: something is wrong on the ROS 2 network, or on one robot, and an
-operator wants statistics for a while. So the daemon is started and stopped by request, the way
-`ros2 daemon` is:
+The daemon is not a permanent service.
+Probing costs a little on every `rmw_*` call (§10), and the use cases are investigative: something is wrong on the ROS 2 network, or on one robot, and an operator wants statistics for a while.
+So the daemon is started and stopped by request, the way `ros2 daemon` is:
 
 ```
 sudo apt install ros-rolling-ros2ebpf-daemon                     # build farm package once released; or a colcon build
@@ -464,27 +430,21 @@ curl -s localhost:9477/metrics | grep ros2_rmw_publish_total | head
 ros2 ebpf stop                                                    # when done; the pinned maps keep the counters
 ```
 
-`ros2 ebpf start` spawns the binary in its own session, waits for the control socket and reports;
-the daemon chowns the socket to the user who ran sudo (or to the `ros2ebpf` group when it exists).
-`ros2 ebpf stop` sends the `stop` RPC. Pinned maps survive stop/start, so counters do not reset.
+`ros2 ebpf start` spawns the binary in its own session, waits for the control socket and reports; the daemon chowns the socket to the user who ran sudo (or to the `ros2ebpf` group when it exists).
+`ros2 ebpf stop` sends the `stop` RPC.
+Pinned maps survive stop/start, so counters do not reset.
 
 ### 9.3 Kubernetes
 
-`deploy/k8s/robot/`: a DaemonSet runs one `ros2ebpfd` per node (`hostPID`, `hostNetwork`), a per-robot
-Alloy Deployment scrapes them through `kubernetes_sd` and `remote_write`s to central.
-`deploy/k8s/central/`: plain kustomize manifests (Prometheus StatefulSet with remote-write receiver,
-Alertmanager, Grafana) or values for `kube-prometheus-stack`.
+`deploy/k8s/robot/`: a DaemonSet runs one `ros2ebpfd` per node (`hostPID`, `hostNetwork`), a per-robot Alloy Deployment scrapes them through `kubernetes_sd` and `remote_write`s to central.
+`deploy/k8s/central/`: plain kustomize manifests (Prometheus StatefulSet with remote-write receiver, Alertmanager, Grafana) or values for `kube-prometheus-stack`.
 
 ### 9.4 Verifying an installation
 
-1. `ros2 ebpf status` on each host: all configured probe families attached, offset table matches
-   the distro, exporter mode `inprocess`, identity shows the expected `robot`.
-2. `curl host:9477/metrics`: `ros2ebpf_host_info` present with correct `machine_id`;
-   `ros2_process_info` lists the running nodes with non-`unknown` `domain_id`.
-3. Central Prometheus: `up{job="ros2ebpf"}` is 1 for every host of every robot; the
-   `Ros2ebpfProbesMissing` and `Ros2ebpfHostDown` alerts are inactive.
-4. Grafana "ROS 2 fleet" dashboard shows publish rates per `(robot, host, topic)`; stop one talker
-   and watch `Ros2TopicRateLow` fire for that robot within ~90 s.
+1. `ros2 ebpf status` on each host: all configured probe families attached, offset table matches the distro, exporter mode `inprocess`, identity shows the expected `robot`.
+2. `curl host:9477/metrics`: `ros2ebpf_host_info` present with correct `machine_id`; `ros2_process_info` lists the running nodes with non-`unknown` `domain_id`.
+3. Central Prometheus: `up{job="ros2ebpf"}` is 1 for every host of every robot; the `Ros2ebpfProbesMissing` and `Ros2ebpfHostDown` alerts are inactive.
+4. Grafana "ROS 2 fleet" dashboard shows publish rates per `(robot, host, topic)`; stop one talker and watch `Ros2TopicRateLow` fire for that robot within ~90 s.
 
 ## 10. Cost model
 
@@ -496,54 +456,34 @@ Alertmanager, Grafana) or values for `kube-prometheus-stack`.
 | always-on cost | event rate × consumer + I/O | event rate only, bounded |
 | per-PID identity | n/a | one `/proc` read per process lifetime, off hot path |
 
-At typical ROS rates (≤ 1 kHz per publisher) the probe cost is < 0.2 % of the period. For very
-high-rate publishers, sample in the BPF program or count only at the subscription. Cost is per host
-and does not grow with the number of hosts on the domain; series count does (hosts × processes ×
-endpoints), controlled by `exclude` and the optional `rmw` label.
+At typical ROS rates (≤ 1 kHz per publisher) the probe cost is < 0.2 % of the period.
+For very high-rate publishers, sample in the BPF program or count only at the subscription.
+Cost is per host and does not grow with the number of hosts on the domain; series count does (hosts × processes × endpoints), controlled by `exclude` and the optional `rmw` label.
 
 ## 11. Known limitations / phase 2
 
-1. **Intra-process comms**: `rmw_publish` is skipped when all subscribers are in-process. Needs the
-   `rclcpp_intra_publish` tracepoint plus handle→name mapping from `rcl_publisher_init`, which
-   requires the daemon to be running before the nodes start. Same mechanism gives node names as a
-   label and the domain ID for processes that set it through init options.
-2. **DDS-internal drops** (reliable reader history overflow) are invisible outside the vendor
-   library; only `RMW_EVENT_MESSAGE_LOST` sees them, and only if the application created the event.
+1. **Intra-process comms**: `rmw_publish` is skipped when all subscribers are in-process.
+   Needs the `rclcpp_intra_publish` tracepoint plus handle→name mapping from `rcl_publisher_init`, which requires the daemon to be running before the nodes start.
+   Same mechanism gives node names as a label and the domain ID for processes that set it through init options.
+2. **DDS-internal drops** (reliable reader history overflow) are invisible outside the vendor library; only `RMW_EVENT_MESSAGE_LOST` sees them, and only if the application created the event.
    Sequence gaps on take are the proxy.
-3. **Sequence numbers** depend on the RMW populating `publication_sequence_number` (Fast DDS and
-   Connext do; verify others), and the per-subscription tracker is exact only for single-publisher
-   topics (two publishers interleave their sequences). In a mixed-vendor robot seq-gap coverage
-   differs per host; `ros2_process_info{rmw}` says where it applies.
-4. **Cross-host loss is a rate inequality, not a count**: no shared clock, so no per-message
-   matching across hosts; the rules compare rates over the same window and need an expected taker
-   count to be exact.
-5. **Domain ID coverage**: resolved from the environment only (phase 2: `rcl_init`); unreadable
-   processes report `unknown`.
-6. **Mixed architectures**: x86_64 and aarch64 covered (LP64, arg0 in `rdi` / `x0`); the BPF object
-   is built per arch and offsets verified per (distro, arch).
-7. **Exporter sinks**: Prometheus text only in phase 1; OTLP push and a ROS topic sink are the
-   motivating cases for the external exporter mode.
-8. Linux-only; `CAP_BPF` + `CAP_PERFMON` (+ `CAP_SYS_PTRACE` for identity); containerised nodes
-   need the shim resolved through `/proc/<pid>/root`.
-9. Offsets are ABI, not API; the per-(distro, arch) table and the runtime identifier check are the
-   mitigation until a stable hook exists.
-10. **Short-lived endpoints**: counters live with the endpoint. A client that is created, used once
-    and destroyed (e.g. a one-shot `add_two_ints_client`) leaves no series behind; the server side
-    of the same call is the durable record.
+3. **Sequence numbers** depend on the RMW populating `publication_sequence_number` (Fast DDS and Connext do; verify others), and the per-subscription tracker is exact only for single-publisher topics (two publishers interleave their sequences).
+   In a mixed-vendor robot seq-gap coverage differs per host; `ros2_process_info{rmw}` says where it applies.
+4. **Cross-host loss is a rate inequality, not a count**: no shared clock, so no per-message matching across hosts; the rules compare rates over the same window and need an expected taker count to be exact.
+5. **Domain ID coverage**: resolved from the environment only (phase 2: `rcl_init`); unreadable processes report `unknown`.
+6. **Mixed architectures**: x86_64 and aarch64 covered (LP64, arg0 in `rdi` / `x0`); the BPF object is built per arch and offsets verified per (distro, arch).
+7. **Exporter sinks**: Prometheus text only in phase 1; OTLP push and a ROS topic sink are the motivating cases for the external exporter mode.
+8. Linux-only; `CAP_BPF` + `CAP_PERFMON` (+ `CAP_SYS_PTRACE` for identity); containerised nodes need the shim resolved through `/proc/<pid>/root`.
+9. Offsets are ABI, not API; the per-(distro, arch) table and the runtime identifier check are the mitigation until a stable hook exists.
+10. **Short-lived endpoints**: counters live with the endpoint.
+    A client that is created, used once and destroyed (e.g. a one-shot `add_two_ints_client`) leaves no series behind; the server side of the same call is the durable record.
 
 ## 12. Implications for ROS 2 mainline
 
-- The removal rationale ("tracepoint tooling covers it") holds for publish/take only if the
-  tracepoints are consumable by something other than LTTng. Confirm whether the shipped
-  `liblttng-ust` carries SDT notes (`readelf -n libtracetools.so | grep stapsdt`) so the
-  ros2_tracing points double as USDT probes; otherwise uprobes on the `ros_trace_*` symbols.
-- Items 1–2 and 5 above are the argument for a small, stable, client-library-independent hook in
-  mainline: an `rcl`-level emission API (or an opt-in counter in the `rmw_implementation` shim)
-  covering intra-process publishes, QoS events (`MESSAGE_LOST`, deadline missed) and the resolved
-  domain ID / node name, which no out-of-process observer can reach today.
-- Cross-host observability would be simpler if `rmw_message_info_t` guaranteed
-  `publication_sequence_number` across vendors; today it is the only portable link between a
-  publisher on one host and a taker on another.
+- The removal rationale ("tracepoint tooling covers it") holds for publish/take only if the tracepoints are consumable by something other than LTTng.
+  Confirm whether the shipped `liblttng-ust` carries SDT notes (`readelf -n libtracetools.so | grep stapsdt`) so the ros2_tracing points double as USDT probes; otherwise uprobes on the `ros_trace_*` symbols.
+- Items 1–2 and 5 above are the argument for a small, stable, client-library-independent hook in mainline: an `rcl`-level emission API (or an opt-in counter in the `rmw_implementation` shim) covering intra-process publishes, QoS events (`MESSAGE_LOST`, deadline missed) and the resolved domain ID / node name, which no out-of-process observer can reach today.
+- Cross-host observability would be simpler if `rmw_message_info_t` guaranteed `publication_sequence_number` across vendors; today it is the only portable link between a publisher on one host and a taker on another.
 - Everything in §4–§9 works against current Debian binaries without upstream changes.
 
 ## 13. Implementation notes (rev. 4)

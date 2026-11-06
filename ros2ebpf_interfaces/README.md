@@ -1,7 +1,6 @@
 # ros2ebpf_interfaces: control protocol
 
-The `ros2 ebpf` CLI, `ros2ebpf-ctl` and any other client talk to `ros2ebpfd`
-with **JSON-RPC 2.0, one JSON object per line**, over:
+The `ros2 ebpf` CLI, `ros2ebpf-ctl` and any other client talk to `ros2ebpfd` with **JSON-RPC 2.0, one JSON object per line**, over:
 
 | Transport | Where | Notes |
 |---|---|---|
@@ -21,9 +20,7 @@ A response:
 {"jsonrpc":"2.0","id":1,"result":{"family":"take","enabled":true,"attached":2,"expected":2}}
 ```
 
-Errors use the JSON-RPC error object with codes `-32700` (parse), `-32600`
-(invalid request), `-32601` (unknown method), `-32602` (bad params),
-`-32000` (daemon-side failure, message explains).
+Errors use the JSON-RPC error object with codes `-32700` (parse), `-32600` (invalid request), `-32601` (unknown method), `-32602` (bad params), `-32000` (daemon-side failure, message explains).
 
 ## Methods
 
@@ -39,6 +36,5 @@ Errors use the JSON-RPC error object with codes `-32700` (parse), `-32600`
 | `discover` | none | `{new_shims}`: run one shim discovery pass now |
 | `stop` | none | `{message}`: the daemon exits after replying (what `ros2 ebpf stop` sends); the maps stay pinned |
 
-The schemas in this directory (`request.schema.json`, `status.schema.json`)
-are the contract the CLI tests against. Add fields freely; never rename or
-change the type of an existing one without bumping `version` in `status`.
+The schemas in this directory (`request.schema.json`, `status.schema.json`) are the contract the CLI tests against.
+Add fields freely; never rename or change the type of an existing one without bumping `version` in `status`.

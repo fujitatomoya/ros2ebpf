@@ -1,7 +1,7 @@
 # Metrics reference
 
-All series are produced by the exporter library from the pinned BPF maps at scrape time. The daemon
-never computes a rate; use `rate()` / `increase()` server-side.
+All series are produced by the exporter library from the pinned BPF maps at scrape time.
+The daemon never computes a rate; use `rate()` / `increase()` server-side.
 
 ## Labels
 
@@ -17,9 +17,8 @@ never computes a rate; use `rate()` / `increase()` server-side.
 | `pid`, `container`, `localhost_only` | `ros2_process_info` only | `/proc` |
 | `le` | histogram buckets | `histogram_buckets_seconds` |
 
-Endpoints that share a label set are summed (two publishers of `/tf` in one process; two
-`talker` processes). Join process facts with
-`... * on (host, comm, domain_id) group_left (pid, container) ros2_process_info` when needed.
+Endpoints that share a label set are summed (two publishers of `/tf` in one process; two `talker` processes).
+Join process facts with `... * on (host, comm, domain_id) group_left (pid, container) ros2_process_info` when needed.
 
 ## Endpoint metrics
 
@@ -34,8 +33,8 @@ Endpoints that share a label set are summed (two publishers of `/tf` in one proc
 | `ros2_rmw_service_response_total{side}` | counter | `server`: `rmw_send_response`; `client`: taken `rmw_take_response` |
 | `ros2_udp_rcvbuf_drop_total{port,comm}` | counter | datagrams dropped on receive because the socket queue was full; `comm` resolved from `/proc/net/udp` when the port belongs to a known ROS process |
 
-Counters disappear with their endpoint (`rmw_destroy_*`) or process. Pinned maps keep them across
-daemon restarts.
+Counters disappear with their endpoint (`rmw_destroy_*`) or process.
+Pinned maps keep them across daemon restarts.
 
 ## Robot-level data
 
