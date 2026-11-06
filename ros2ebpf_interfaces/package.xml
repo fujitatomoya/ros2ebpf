@@ -6,8 +6,10 @@
   <description>Control protocol schema (JSON-RPC over unix socket) shared by the ros2 ebpf CLI and ros2ebpfd.</description>
   <maintainer email="fujita.tomoya@triorb.co.jp">Tomoya Fujita</maintainer>
   <license>Apache-2.0</license>
-  <buildtool_depend>cmake</buildtool_depend>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
   <export>
-    <build_type>cmake</build_type>
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

@@ -31,7 +31,8 @@ class ExpectationsVerb(VerbExtension):
         sub = parser.add_subparsers(dest='action', required=True)
         cap = sub.add_parser('capture', help='Observe rates for a while and write expectations.yaml')
         cap.add_argument('--duration', type=float, default=60.0, help='Seconds to observe (default: %(default)s)')
-        cap.add_argument('--output', '-o', default='expectations.yaml', help='Output file (default: %(default)s); - for stdout')
+        cap.add_argument('--output', '-o', default='expectations.yaml',
+                         help='Output file (default: %(default)s); - for stdout')
         cap.add_argument('--min-hz', type=float, default=0.1, help='Skip topics below this rate (default: %(default)s)')
         cap.add_argument('--round', type=int, default=1, help='Decimal places (default: %(default)s)')
         cap.add_argument('--takers', action='store_true', help='Also record the number of taking targets per topic')

@@ -75,9 +75,9 @@ Components:
 
 ```
 ros2ebpf/                 ros2 ebpf CLI (ament_python)
-ros2ebpf_daemon/          ros2ebpfd: bpf/ (BPF C), src/ (loader, identity, control), config/, systemd/, offsets/
-ros2ebpf_exporter/        exporter library, include/ros2ebpf/maps.h (map contract), ros2ebpf-exporter
-ros2ebpf_interfaces/      control protocol schema + README
+ros2ebpf_daemon/          ros2ebpfd (ament_cmake): bpf/ (BPF C), src/ (loader, identity, control), config/, systemd/, offsets/
+ros2ebpf_exporter/        exporter library (ament_cmake), include/ros2ebpf/maps.h (map contract), ros2ebpf-exporter
+ros2ebpf_interfaces/      control protocol schema + README (ament_cmake)
 deploy/docker-compose/    bench: daemon + Alloy + Prometheus + Alertmanager + Grafana (+ demo nodes, + cli)
 deploy/k8s/               robot DaemonSet + Alloy; central Prometheus/Alertmanager/Grafana (kustomize, helm values)
 deploy/prometheus/        prometheus.yml, rules/ros2.yaml (alerts), alertmanager.yml
@@ -101,7 +101,9 @@ Probed host (robot computer):
 
 Build host (can be the same machine, or the Docker toolchain image):
 
-- Ubuntu 24.04: `clang-18`, `libbpf-dev` (≥ 1.0), `bpftool` (from `linux-tools-generic`), `cmake`,
+- Ubuntu 24.04 with ROS 2 (Jazzy or newer) for `ament_cmake` and `colcon`; the packages are built
+  like any other ROS 2 workspace. The daemon and exporter still do not use ROS at runtime.
+- `clang-18`, `libbpf-dev` (≥ 1.0), `bpftool` (from `linux-tools-generic`), `cmake`,
   `libyaml-dev`, `libjson-c-dev`, `libelf-dev`, `zlib1g-dev`.
 - Ubuntu 22.04 ships libbpf 0.5, which is too old: build on 24.04, use the `ros2ebpfd` container
   image, or build libbpf ≥ 1.3 from source first.
@@ -117,20 +119,25 @@ Prometheus scraping it directly. Commands were verified on Ubuntu 24.04 with ROS
 
 ```bash
 sudo apt install -y build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev \
-     linux-tools-common linux-tools-generic libelf-dev zlib1g-dev libyaml-dev libjson-c-dev
+     linux-tools-common linux-tools-generic libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
+     ros-jazzy-ament-cmake python3-colcon-common-extensions
 sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
 # bpftool: the wrapper in linux-tools-common needs a matching kernel package; link a real one
 sudo ln -sf "$(ls -d /usr/lib/linux-tools/*/ | head -1)bpftool" /usr/local/bin/bpftool
 
 git clone https://github.com/fujitatomoya/ros2ebpf.git
 cd ros2ebpf
-make all test            # builds build/exporter and build/daemon, runs the unit tests
-sudo make install        # /usr/local/sbin/ros2ebpfd, /usr/local/bin/{ros2ebpf-ctl,ros2ebpf-exporter},
-                         # /usr/local/lib/systemd/system/ros2ebpfd.service, /usr/local/etc/ros2ebpf/*.example.yaml
+source /opt/ros/jazzy/setup.bash
+colcon build --merge-install --packages-up-to ros2ebpf_daemon    # or: make all
+colcon test --merge-install && colcon test-result --verbose      # or: make test
+# install/bin/{ros2ebpfd,ros2ebpf-ctl,ros2ebpf-exporter}, install/lib/systemd/system/ros2ebpfd.service
+# (ExecStart already points at this install/), install/etc/ros2ebpf/*.example.yaml
 ```
 
-Or build a Debian package and install that instead (`make deb`, see
-[docs/development.md](docs/development.md)).
+The repository is a colcon workspace on its own; it can equally be cloned into `src/` of an
+existing one. To install system-wide, build a Debian package instead (`make deb`, see
+[docs/development.md](docs/development.md)): `/usr/bin/ros2ebpfd`, `/usr/lib/systemd/system/ros2ebpfd.service`,
+`/etc/ros2ebpf/*.example.yaml`.
 
 ### 4.2 Configure
 
@@ -161,9 +168,8 @@ sudo ros2ebpfd --check -c /etc/ros2ebpf/config.yaml      # config parses, shim e
 
 ```bash
 sudo groupadd -f ros2ebpf && sudo usermod -aG ros2ebpf "$USER"   # lets your user talk to the control socket
-sudo cp /usr/local/lib/systemd/system/ros2ebpfd.service /etc/systemd/system/
-sudo sed -i 's|/usr/sbin/ros2ebpfd|/usr/local/sbin/ros2ebpfd|' /etc/systemd/system/ros2ebpfd.service
-sudo systemctl daemon-reload
+sudo cp install/lib/systemd/system/ros2ebpfd.service /etc/systemd/system/   # ExecStart=<this clone>/install/bin/ros2ebpfd
+sudo systemctl daemon-reload                                                 # (the .deb installs the unit itself)
 sudo systemctl enable --now ros2ebpfd
 sudo systemctl status ros2ebpfd --no-pager
 journalctl -u ros2ebpfd -n 20 --no-pager
@@ -183,15 +189,14 @@ I control socket at /run/ros2ebpf/control.sock (group ros2ebpf)
 I ready: 16/16 probe links attached, 1 shim(s), offset table jazzy/x86_64
 ```
 
-To run in the foreground instead: `sudo ros2ebpfd -c /etc/ros2ebpf/config.yaml --log-level debug`.
+To run in the foreground instead: `sudo install/bin/ros2ebpfd -c /etc/ros2ebpf/config.yaml --log-level debug`.
 
 ### 4.4 Install the CLI
 
-The CLI is a normal ROS 2 Python package. In a colcon workspace:
+The CLI is a normal ROS 2 Python package in the same workspace:
 
 ```bash
-mkdir -p ~/ros2ebpf_ws/src && ln -s "$PWD/ros2ebpf" ~/ros2ebpf_ws/src/ros2ebpf
-cd ~/ros2ebpf_ws && source /opt/ros/jazzy/setup.bash && colcon build --packages-select ros2ebpf
+colcon build --merge-install --packages-select ros2ebpf     # or: make cli
 source install/setup.bash
 ros2 ebpf --help
 ```
@@ -472,7 +477,7 @@ Details and the rationale behind each decision: [docs/design.md](docs/design.md)
   and the manual multi-host test plan.
 
 ```bash
-make build-image in-docker-test     # build + all unit tests inside the toolchain container (nothing on the host)
+make build-image in-docker-test     # colcon build + all unit tests inside the toolchain container (no ROS on the host)
 make images e2e                     # container end-to-end test (needs Docker, a BTF kernel, bpffs)
 make lint                           # promtool / amtool / kustomize / compose validation of deploy/
 ```

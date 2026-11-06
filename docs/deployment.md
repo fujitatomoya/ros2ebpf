@@ -26,7 +26,7 @@ CPU architectures; each daemon exports what it found in `ros2ebpf_host_info`.
 ```bash
 # install: a .deb built on a matching arch (make deb), or the container image
 sudo apt install ./ros2ebpf-daemon_0.1.0_amd64.deb        # or _arm64.deb
-sudo cp /etc/ros2ebpf/config.example.yaml /etc/ros2ebpf/config.yaml      # (/usr/local/etc/ros2ebpf/ for a `make install` build)
+sudo cp /etc/ros2ebpf/config.example.yaml /etc/ros2ebpf/config.yaml      # (install/etc/ros2ebpf/ for a colcon build)
 sudoedit /etc/ros2ebpf/config.yaml
 ```
 
