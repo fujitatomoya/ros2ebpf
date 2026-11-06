@@ -59,6 +59,8 @@ install(FILES
 
 # ament index entry so `colcon build` in a ROS workspace treats this as a package
 install(FILES package.xml DESTINATION share/${PROJECT_NAME})
+# Keep colcon from crawling this build tree (cpack stages package.xml under _CPack_Packages/).
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/COLCON_IGNORE "")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/ament_index_marker "")
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ament_index_marker
   DESTINATION share/ament_index/resource_index/packages RENAME ${PROJECT_NAME})

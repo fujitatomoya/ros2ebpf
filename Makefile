@@ -8,7 +8,12 @@ IMAGE_BUILD ?= ros2ebpf-build:local
 
 all: exporter daemon
 
-exporter:
+# The build tree holds staged copies of package.xml (cpack); mark it so colcon skips it when
+# this checkout sits inside a colcon workspace.
+$(BUILD)/COLCON_IGNORE:
+	mkdir -p $(BUILD) && touch $@
+
+exporter: $(BUILD)/COLCON_IGNORE
 	cmake -S ros2ebpf_exporter -B $(BUILD)/exporter -DCMAKE_BUILD_TYPE=RelWithDebInfo
 	cmake --build $(BUILD)/exporter -j$(JOBS)
 
@@ -30,7 +35,7 @@ install: all
 clean:
 	rm -rf $(BUILD)
 
-deb:                             ## Debian packages into build/pkg (run natively or via in-docker-deb)
+deb: $(BUILD)/COLCON_IGNORE      ## Debian packages into build/pkg (run natively or via in-docker-deb)
 	cmake -S ros2ebpf_exporter -B $(BUILD)/pkg-exporter -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DROS2EBPF_BUILD_TESTING=OFF
 	cmake --build $(BUILD)/pkg-exporter -j$(JOBS)
 	cd $(BUILD)/pkg-exporter && cpack -G DEB

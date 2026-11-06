@@ -101,6 +101,10 @@ install(FILES offsets/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/ros2ebpf/of
 install(FILES ${GEN_DIR}/rmw_probes.bpf.o ${GEN_DIR}/udp_drops.bpf.o
   DESTINATION ${CMAKE_INSTALL_DATADIR}/ros2ebpf/bpf)
 install(FILES package.xml DESTINATION share/${PROJECT_NAME})
+# Keep colcon from crawling this build tree: cpack stages a copy of package.xml under
+# _CPack_Packages/, which otherwise shows up as a duplicate package when the build
+# directory lives inside a colcon workspace (fujitatomoya/ros2ebpf#1).
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/COLCON_IGNORE "")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/ament_index_marker "")
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ament_index_marker
   DESTINATION share/ament_index/resource_index/packages RENAME ${PROJECT_NAME})
