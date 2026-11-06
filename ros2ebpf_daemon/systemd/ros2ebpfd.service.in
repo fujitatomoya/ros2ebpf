@@ -6,8 +6,8 @@ ConditionPathIsMountPoint=/sys/fs/bpf
 
 [Service]
 Type=simple
-ExecStartPre=/usr/sbin/ros2ebpfd --check -c /etc/ros2ebpf/config.yaml
-ExecStart=/usr/sbin/ros2ebpfd -c /etc/ros2ebpf/config.yaml
+ExecStartPre=@ROS2EBPFD_BIN@ --check -c /etc/ros2ebpf/config.yaml
+ExecStart=@ROS2EBPFD_BIN@ -c /etc/ros2ebpf/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5

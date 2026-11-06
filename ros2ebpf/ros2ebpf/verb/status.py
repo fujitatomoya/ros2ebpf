@@ -103,7 +103,7 @@ class StatusVerb(VerbExtension):
             if verbose:
                 rows[-1].append(fam_txt)
         for name, err in errors.items():
-            rows.append([name, 'ERR', '', '', '', '', '', '', '', '', ''] + (['' ] if verbose else []))
+            rows.append([name, 'ERR', '', '', '', '', '', '', '', '', ''] + ([''] if verbose else []))
         headers = ['Target', 'Healthy', 'Host', 'Robot', 'Links', 'Shims', 'Exporter',
                    'Procs', 'Domains', 'Offsets', 'Uptime']
         if verbose:

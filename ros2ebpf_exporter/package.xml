@@ -3,15 +3,18 @@
 <package format="3">
   <name>ros2ebpf_exporter</name>
   <version>0.1.0</version>
-  <description>Reads the ros2ebpf pinned BPF maps and renders Prometheus exposition. No ROS dependency.</description>
+  <description>Reads the ros2ebpf pinned BPF maps and renders Prometheus exposition. No ROS runtime dependency.</description>
   <maintainer email="fujita.tomoya@triorb.co.jp">Tomoya Fujita</maintainer>
   <license>Apache-2.0</license>
 
-  <buildtool_depend>cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
   <build_depend>pkg-config</build_depend>
+  <!-- no rosdep key yet: pass it to rosdep via skip-keys, see docs/development.md -->
   <depend>libbpf-dev</depend>
 
+  <test_depend>ament_cmake_test</test_depend>
+
   <export>
-    <build_type>cmake</build_type>
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

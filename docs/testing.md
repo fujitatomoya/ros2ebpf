@@ -4,12 +4,13 @@
 
 | Test | What it covers | Run |
 |---|---|---|
-| `ros2ebpf_exporter/test/test_render.c` | rendering from an in-memory snapshot: aggregation by label set, exclusion tombstones, unresolved/unnamed endpoints, escaping, cumulative histogram with `+Inf`/`_sum`/`_count`, service sides, UDP attribution, expectations, process/host info, self-health, `robot`/`rmw` labels, `expectations.yaml` parser | `ctest --test-dir build/exporter` |
-| `ros2ebpf_daemon/test/test_config.c` | full `config.yaml` parse, defaults, `seq_gap: all`, empty lists clearing defaults, invalid values, immutable-key diff, offset table lookup, distro-from-path, ELF symbol check | `ctest --test-dir build/daemon` |
-| `ros2ebpf/test/test_api.py` | unix-socket JSON-RPC client against a fake daemon, transports from host specs, `fleet.yaml`, target resolution, table formatting, rate computation (aggregation, filters, tombstones) | `cd ros2ebpf && pytest` |
+| `ros2ebpf_exporter/test/test_render.c` | rendering from an in-memory snapshot: aggregation by label set, exclusion tombstones, unresolved/unnamed endpoints, escaping, cumulative histogram with `+Inf`/`_sum`/`_count`, service sides, UDP attribution, expectations, process/host info, self-health, `robot`/`rmw` labels, `expectations.yaml` parser | `colcon test --packages-select ros2ebpf_exporter` |
+| `ros2ebpf_daemon/test/test_config.c` | full `config.yaml` parse, defaults, `seq_gap: all`, empty lists clearing defaults, invalid values, immutable-key diff, offset table lookup, distro-from-path, ELF symbol check | `colcon test --packages-select ros2ebpf_daemon` |
+| `ros2ebpf/test/test_api.py` | unix-socket JSON-RPC client against a fake daemon, transports from host specs, `fleet.yaml`, target resolution, table formatting, rate computation (aggregation, filters, tombstones) | `colcon test --packages-select ros2ebpf` (or `cd ros2ebpf && pytest`) |
 | `ros2ebpf/test/test_verbs.py` | config get/set on a file, value coercion, status table, ELF parser on libc and (if present) a real shim | same |
 
-`make test cli-test` or `make in-docker-test`.
+`make test cli-test` or `make in-docker-test`; `colcon test-result --verbose` prints the results
+(the C tests go through `ament_add_test`).
 
 ## 2. Container end-to-end (`scripts/e2e.sh`, `make e2e`)
 
@@ -58,10 +59,10 @@ The CLI image was exercised against the same daemon: `ros2 ebpf status -v`, `top
 ## 3. Host-only check (needs root on a ROS 2 host)
 
 ```bash
-sudo build/daemon/ros2ebpfd --check -c /etc/ros2ebpf/config.yaml
-sudo build/daemon/ros2ebpfd -c /etc/ros2ebpf/config.yaml --log-level debug &
+sudo install/bin/ros2ebpfd --check -c /etc/ros2ebpf/config.yaml
+sudo install/bin/ros2ebpfd -c /etc/ros2ebpf/config.yaml --log-level debug &
 ros2 run demo_nodes_cpp talker &
-build/daemon/ros2ebpf-ctl status
+install/bin/ros2ebpf-ctl status
 curl -s localhost:9477/metrics | grep chatter
 ```
 

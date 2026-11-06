@@ -25,7 +25,10 @@ from ros2ebpf.verb import VerbExtension
 
 
 class TopVerb(VerbExtension):
-    """Live per-endpoint rates computed client-side from two map reads (bench use; the server does this in production)."""
+    """Live per-endpoint rates computed client-side from two map reads.
+
+    Bench use; the server does this in production.
+    """
 
     def add_arguments(self, parser, cli_name):
         parser.add_argument('--topic', '-t', help='Only this topic / service name')

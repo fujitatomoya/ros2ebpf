@@ -2,36 +2,51 @@
 
 ## Build
 
-Native (Ubuntu 24.04):
+All four packages are ROS 2 packages built with colcon: `ros2ebpf_exporter`, `ros2ebpf_daemon` and
+`ros2ebpf_interfaces` are `ament_cmake`, `ros2ebpf` is `ament_python`. The repository root is a
+colcon workspace by itself (`build/`, `install/`, `log/` are git-ignored); it can also be cloned into
+`src/` of a larger workspace. The daemon and exporter use ament only at build time: nothing from
+ROS is needed on the host they run on.
+
+Native (Ubuntu 24.04, ROS 2 Jazzy or newer):
 
 ```bash
 sudo apt install -y build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev \
      linux-tools-common linux-tools-generic libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
-     python3-yaml python3-pytest
+     python3-yaml python3-pytest python3-flake8 \
+     ros-jazzy-ament-cmake ros-jazzy-ros2cli python3-colcon-common-extensions
 sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
 sudo ln -sf "$(ls -d /usr/lib/linux-tools/*/ | head -1)bpftool" /usr/local/bin/bpftool
-make all test cli-test
+# (if apt refuses linux-tools-generic while the mirrors are syncing: sudo sh docker/install-bpftool.sh)
+source /opt/ros/jazzy/setup.bash
+colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+colcon test --merge-install && colcon test-result --verbose
 ```
 
-In the toolchain container (nothing installed on the host):
+`make all test cli-test` wraps the same calls (`ROS_DISTRO=jazzy` by default; the Makefile sources
+`/opt/ros/$ROS_DISTRO/setup.sh` itself). `--merge-install` gives one prefix (`install/bin`,
+`install/etc/ros2ebpf`, `install/lib/systemd/system`) that the tutorials and the container images
+rely on; without it every package gets its own prefix under `install/<pkg>/`.
+
+`rosdep install --from-paths . --ignore-src -y --skip-keys "libbpf-dev bpftool"` resolves the
+remaining dependencies; `libbpf-dev` and `bpftool` have no rosdep key yet (see Packaging below)
+and are installed by hand as above.
+
+In the toolchain container (nothing installed on the host, runs as your user):
 
 ```bash
-make build-image            # docker/Dockerfile.build -> ros2ebpf-build:local
-make in-docker-test         # cmake build + ctest + pytest inside it, build/ on the host
+make build-image            # docker/Dockerfile.build -> ros2ebpf-build:local (ros-base + clang/libbpf/bpftool)
+make in-docker-test         # colcon build + test + flake8 inside it, build/ install/ log/ on the host
 ```
 
-As ROS packages in a colcon workspace (`ros2ebpf_daemon` and `ros2ebpf_exporter` are plain CMake
-packages with a `package.xml`, `ros2ebpf` is ament_python):
+Build options (`--cmake-args`): `-DBUILD_TESTING=OFF` skips the unit tests, `-DBPF_TARGET_ARCH=arm64`
+cross-compiles the BPF objects. The C tests are registered with `ament_add_test`, so
+`colcon test-result` sees them like any other ROS package's tests.
 
-```bash
-colcon build --packages-up-to ros2ebpf ros2ebpf_daemon
-```
-
-The in-tree `build/` directory produced by `make` / `cmake` is marked with `COLCON_IGNORE` (by the
-Makefile and by both CMake projects at configure time), so a checkout that was also built natively
-or packaged with `make deb` does not confuse colcon with the staged copies of `package.xml` under
-`build/*/_CPack_Packages/`. If you configured with plain `cmake` before that marker existed, run
-`touch build/COLCON_IGNORE` once or remove `build/`.
+The in-tree build directories of the Debian package build (`make deb`, plain cmake under `build/`)
+are marked with `COLCON_IGNORE` so the staged copies of `package.xml` under
+`build/*/_CPack_Packages/` never show up as duplicate packages; colcon marks its own build base the
+same way.
 
 Cross build for aarch64: `-DBPF_TARGET_ARCH=arm64` for the BPF objects plus a normal CMake
 toolchain file for the user-space parts; `docker buildx build --platform linux/arm64 -f
@@ -105,20 +120,25 @@ one) in the CLI.
 
 ## Packaging
 
-Debian packages with CPack (built on the target architecture, or in the toolchain container):
+Debian packages with CPack (built on the target architecture, or in the toolchain container with
+`make in-docker-deb`). They install under `/usr` and `/etc`, for hosts without ROS:
 
 ```bash
-make deb                    # build/pkg/ros2ebpf-daemon_0.1.0_amd64.deb (daemon + exporter + ctl + unit + examples)
-                            # build/pkg/ros2ebpf-exporter_0.1.0_amd64.deb (library + headers + standalone exporter)
+make deb                    # build/pkg/ros2ebpf-daemon_0.1.0_amd64.deb   (ros2ebpfd, ros2ebpf-ctl, unit, example configs)
+                            # build/pkg/ros2ebpf-exporter_0.1.0_amd64.deb (static library + headers + standalone exporter)
 sudo apt install ./build/pkg/ros2ebpf-daemon_0.1.0_amd64.deb
 ```
 
-The daemon links the exporter library statically (built from the sibling directory), so it does
-not depend on `ros2ebpf-exporter`; install that one only for the standalone binary / headers.
+The daemon links the exporter library statically, so `ros2ebpf-daemon` does not depend on
+`ros2ebpf-exporter`; install that one only for the standalone binary / headers. The unit is
+installed as `/usr/lib/systemd/system/ros2ebpfd.service` with `ExecStart=/usr/bin/ros2ebpfd`.
 `postinst` creates the `ros2ebpf` group and runs `systemctl daemon-reload`; it does not enable the
 unit. Container images: `docker/Dockerfile.daemon`, `docker/Dockerfile.cli` (`make images`).
 
-The CLI is released like any ROS 2 Python package (bloom / buildfarm), or `pip install ./ros2ebpf`.
+Releasing through bloom / the ROS build farm (`ros-<distro>-ros2ebpf-*` packages under
+`/opt/ros/<distro>`) is the ROS-native route for all four packages and needs rosdep keys for
+`libbpf-dev` and `bpftool` first (a `ros/rosdistro` pull request); until then `rosdep` needs
+`--skip-keys "libbpf-dev bpftool"`. The CLI can also be installed with `pip install ./ros2ebpf`.
 
 ## Deploy sources of truth
 
@@ -129,7 +149,8 @@ dashboards and commit the result; `make lint` runs it and validates everything.
 
 ## CI
 
-`.github/workflows/ci.yaml`: native build + unit tests, a real load of the BPF objects on the
-runner kernel (verifier check, `/metrics` smoke test), CLI tests + flake8, container image builds
-with a privileged smoke test, and validation of everything under `deploy/` (promtool, amtool,
-kustomize, compose, alloy fmt).
+`.github/workflows/ci.yaml`: ROS 2 Jazzy via `ros-tooling/setup-ros`, `colcon build` + `colcon test`
+of all packages, flake8 for the CLI, a real load of the BPF objects on the runner kernel (verifier
+check, `/metrics` smoke test), the Debian package build, container image builds with a privileged
+smoke test, and validation of everything under `deploy/` (promtool, amtool, kustomize, compose,
+alloy fmt).

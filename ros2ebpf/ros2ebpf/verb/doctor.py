@@ -24,7 +24,6 @@ import os
 import platform
 import re
 import struct
-import sys
 import urllib.request
 
 import yaml
@@ -129,7 +128,9 @@ class DoctorVerb(VerbExtension):
             rep('PASS', 'privileges', 'CAP_BPF + CAP_PERFMON'
                 + ('' if caps & (1 << CAP_SYS_PTRACE) else ' (no CAP_SYS_PTRACE: domain_id will be unknown)'))
         else:
-            rep('WARN', 'privileges', 'this shell has no CAP_BPF; fine for the CLI, ros2ebpfd itself needs them (systemd unit sets AmbientCapabilities)')
+            rep('WARN', 'privileges',
+                'this shell has no CAP_BPF; fine for the CLI, ros2ebpfd itself needs them '
+                '(systemd unit sets AmbientCapabilities)')
 
         shims = list(args.shim)
         cfg = {}
@@ -184,7 +185,8 @@ class DoctorVerb(VerbExtension):
                     n = sum(1 for line in body.splitlines() if line and not line.startswith('#'))
                     rep('PASS', f'exporter {url}', f'{n} samples')
                 except Exception as e:
-                    rep('FAIL', f'exporter {url}', f'{e} (running in a container? the port belongs to the daemon\'s network namespace)')
+                    rep('FAIL', f'exporter {url}',
+                        f"{e} (running in a container? the port belongs to the daemon's network namespace)")
             elif mode == 'external':
                 rep('INFO', 'exporter', 'external mode: check ros2ebpf-exporter separately')
         except ConnectError as e:

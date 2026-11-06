@@ -8,27 +8,15 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-unused-result -D_GNU_SOURCE)
 
-include(GNUInstallDirs)
+find_package(ament_cmake REQUIRED)
+find_package(ros2ebpf_exporter REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBBPF REQUIRED IMPORTED_TARGET libbpf>=1.0)
 pkg_check_modules(YAML REQUIRED IMPORTED_TARGET yaml-0.1)
 pkg_check_modules(JSONC REQUIRED IMPORTED_TARGET json-c)
 
-# The exporter library: installed package, or the sibling source tree.
-find_package(ros2ebpf_exporter QUIET)
-if(NOT ros2ebpf_exporter_FOUND)
-  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../ros2ebpf_exporter/CMakeLists.txt)
-    message(STATUS "Using sibling ros2ebpf_exporter sources")
-    set(ROS2EBPF_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ros2ebpf_exporter ros2ebpf_exporter)
-    add_library(ros2ebpf::ros2ebpf_exporter ALIAS ros2ebpf_exporter)
-    set(EXPORTER_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../ros2ebpf_exporter/include)
-  else()
-    message(FATAL_ERROR "ros2ebpf_exporter not found: install it or build from the repository root")
-  endif()
-else()
-  get_target_property(EXPORTER_INCLUDE ros2ebpf::ros2ebpf_exporter INTERFACE_INCLUDE_DIRECTORIES)
-endif()
+# ros2ebpf/maps.h is shared with the BPF programs (compiled below outside of CMake's C toolchain)
+set(EXPORTER_INCLUDE ${ros2ebpf_exporter_INCLUDE_DIRS})
 
 # ---- BPF objects + skeletons ------------------------------------------------
 find_program(BPF_CLANG NAMES clang clang-18 clang-17 clang-16 clang-15 REQUIRED)
@@ -73,48 +61,59 @@ add_executable(ros2ebpfd
 add_dependencies(ros2ebpfd bpf_skeletons)
 target_include_directories(ros2ebpfd PRIVATE ${GEN_DIR} src)
 target_compile_definitions(ros2ebpfd PRIVATE ROS2EBPFD_VERSION="${PROJECT_VERSION}")
-target_link_libraries(ros2ebpfd PRIVATE ros2ebpf::ros2ebpf_exporter PkgConfig::LIBBPF PkgConfig::YAML PkgConfig::JSONC)
+target_link_libraries(ros2ebpfd PRIVATE
+  ros2ebpf_exporter::ros2ebpf_exporter PkgConfig::LIBBPF PkgConfig::YAML PkgConfig::JSONC)
 
 add_executable(ros2ebpf-ctl src/ros2ebpf-ctl.c)
 target_link_libraries(ros2ebpf-ctl PRIVATE PkgConfig::JSONC)
 
 # ---- tests ----------------------------------------------------------------
-option(ROS2EBPF_DAEMON_TESTING "Build daemon unit tests" ON)
-if(ROS2EBPF_DAEMON_TESTING)
-  enable_testing()
+option(BUILD_TESTING "Build daemon unit tests" ON)
+if(BUILD_TESTING)
+  find_package(ament_cmake_test REQUIRED)
   add_executable(test_config test/test_config.c src/config.c src/offsets.c)
   target_include_directories(test_config PRIVATE src ${EXPORTER_INCLUDE})
   target_link_libraries(test_config PRIVATE PkgConfig::YAML)
-  add_test(NAME test_config COMMAND test_config ${CMAKE_CURRENT_SOURCE_DIR}/test)
+  ament_add_test(test_config
+    COMMAND "$<TARGET_FILE:test_config>" ${CMAKE_CURRENT_SOURCE_DIR}/test
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 endif()
 
 # ---- install --------------------------------------------------------------
-install(TARGETS ros2ebpfd RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR})
-install(TARGETS ros2ebpf-ctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES systemd/ros2ebpfd.service DESTINATION lib/systemd/system)
-# with CMAKE_INSTALL_PREFIX=/usr the unit lands in /usr/lib/systemd/system and ExecStart matches /usr/sbin
-# absolute: /etc/ros2ebpf with prefix /usr (packages), /usr/local/etc/ros2ebpf with the default prefix
+# Executables: bin/ so they are on PATH (systemd unit, containers), lib/<pkg>/ for `ros2 run`.
+install(TARGETS ros2ebpfd ros2ebpf-ctl RUNTIME DESTINATION bin)
+install(TARGETS ros2ebpfd ros2ebpf-ctl RUNTIME DESTINATION lib/${PROJECT_NAME})
+
+# systemd unit with the absolute daemon path of this install prefix:
+# /usr/bin/ros2ebpfd in the Debian package, <workspace>/install/bin/ros2ebpfd for a colcon build.
+set(ROS2EBPFD_BIN ${CMAKE_INSTALL_PREFIX}/bin/ros2ebpfd)
+configure_file(systemd/ros2ebpfd.service.in ${CMAKE_CURRENT_BINARY_DIR}/ros2ebpfd.service @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ros2ebpfd.service DESTINATION lib/systemd/system)
+
+# /etc/ros2ebpf with prefix /usr (Debian package), <prefix>/etc/ros2ebpf otherwise (colcon install/, images)
+if(CMAKE_INSTALL_PREFIX MATCHES "^/usr/?$")
+  set(ROS2EBPF_SYSCONFDIR /etc)
+else()
+  set(ROS2EBPF_SYSCONFDIR etc)
+endif()
 install(FILES config/config.example.yaml config/expectations.example.yaml
-  DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/ros2ebpf)
-install(PROGRAMS offsets/gen.sh DESTINATION ${CMAKE_INSTALL_DATADIR}/ros2ebpf/offsets)
-install(FILES offsets/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/ros2ebpf/offsets)
+  DESTINATION ${ROS2EBPF_SYSCONFDIR}/ros2ebpf)
+install(PROGRAMS offsets/gen.sh DESTINATION share/${PROJECT_NAME}/offsets)
+install(FILES offsets/README.md DESTINATION share/${PROJECT_NAME}/offsets)
 install(FILES ${GEN_DIR}/rmw_probes.bpf.o ${GEN_DIR}/udp_drops.bpf.o
-  DESTINATION ${CMAKE_INSTALL_DATADIR}/ros2ebpf/bpf)
-install(FILES package.xml DESTINATION share/${PROJECT_NAME})
+  DESTINATION share/${PROJECT_NAME}/bpf)
+
 # Keep colcon from crawling this build tree: cpack stages a copy of package.xml under
 # _CPack_Packages/, which otherwise shows up as a duplicate package when the build
 # directory lives inside a colcon workspace (fujitatomoya/ros2ebpf#1).
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/COLCON_IGNORE "")
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/ament_index_marker "")
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ament_index_marker
-  DESTINATION share/ament_index/resource_index/packages RENAME ${PROJECT_NAME})
 
-# ---- Debian package (cpack -G DEB) ----------------------------------------
+# ---- Debian package (cpack -G DEB, see `make deb`) ------------------------
 set(CPACK_GENERATOR DEB)
 set(CPACK_PACKAGE_NAME ros2ebpf-daemon)
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_CONTACT "Tomoya Fujita <fujita.tomoya@triorb.co.jp>")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "ROS 2 endpoint statistics via eBPF: ros2ebpfd, ros2ebpf-ctl, exporter")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "ROS 2 endpoint statistics via eBPF: ros2ebpfd and ros2ebpf-ctl")
 set(CPACK_DEBIAN_PACKAGE_SECTION admin)
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
@@ -124,3 +123,5 @@ set(CPACK_DEBIAN_PACKAGE_CONFFILES "")
 set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
 set(CPACK_SET_DESTDIR ON)
 include(CPack)
+
+ament_package()

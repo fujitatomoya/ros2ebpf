@@ -1,66 +1,72 @@
-# Convenience targets. Everything also works with plain cmake / docker; see docs/development.md.
+# Convenience targets around colcon. Everything also works with plain colcon / docker; see docs/development.md.
 BUILD ?= build
 JOBS  ?= $(shell nproc)
+ROS_DISTRO ?= jazzy
+ROS_SETUP  ?= /opt/ros/$(ROS_DISTRO)/setup.sh
 IMAGE_BUILD ?= ros2ebpf-build:local
+# run as the host user so build/ install/ log/ stay owned by you
+DOCKER_RUN = docker run --rm -u $(shell id -u):$(shell id -g) -e HOME=/tmp -v "$(CURDIR)":/src -w /src $(IMAGE_BUILD)
 
-.PHONY: all exporter daemon test cli-test install clean \
-        build-image images image-daemon image-cli image-demo e2e e2e-clean k8s-rules lint
+# source the ROS underlay for every colcon call (a no-op if the shell already did)
+COLCON = . $(ROS_SETUP) && colcon
+C_PKGS = ros2ebpf_exporter ros2ebpf_daemon ros2ebpf_interfaces
+CLI_PKG = ros2ebpf
+BUILD_ARGS = --merge-install --build-base $(BUILD) --event-handlers console_cohesion+
+BUILD_TYPE ?= RelWithDebInfo
 
-all: exporter daemon
+.PHONY: all cli test cli-test clean deb in-docker-deb \
+        build-image in-docker-test images image-daemon image-cli image-demo e2e e2e-clean k8s-sync k8s-rules lint
 
-# The build tree holds staged copies of package.xml (cpack); mark it so colcon skips it when
-# this checkout sits inside a colcon workspace.
+all:                             ## exporter + daemon + interfaces -> install/ (merged prefix)
+	$(COLCON) build $(BUILD_ARGS) --packages-up-to $(C_PKGS) --cmake-args -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+
+cli:                             ## the `ros2 ebpf` CLI (ament_python)
+	$(COLCON) build $(BUILD_ARGS) --packages-select $(CLI_PKG)
+
+test: all                        ## C unit tests (ament_add_test -> ctest)
+	$(COLCON) test $(BUILD_ARGS) --packages-select $(C_PKGS)
+	$(COLCON) test-result --test-result-base $(BUILD) --verbose
+
+cli-test: cli                    ## pytest for the CLI + flake8
+	$(COLCON) test $(BUILD_ARGS) --packages-select $(CLI_PKG)
+	$(COLCON) test-result --test-result-base $(BUILD) --verbose
+	cd ros2ebpf && python3 -m flake8 --select=E,W,F --extend-ignore=W503 --max-line-length=120 ros2ebpf test
+
+clean:
+	rm -rf $(BUILD) install log
+
+# The deb build uses plain cmake in its own build dirs; colcon marks its own build base itself.
 $(BUILD)/COLCON_IGNORE:
 	mkdir -p $(BUILD) && touch $@
 
-exporter: $(BUILD)/COLCON_IGNORE
-	cmake -S ros2ebpf_exporter -B $(BUILD)/exporter -DCMAKE_BUILD_TYPE=RelWithDebInfo
-	cmake --build $(BUILD)/exporter -j$(JOBS)
-
-daemon: exporter
-	cmake -S ros2ebpf_daemon -B $(BUILD)/daemon -DCMAKE_BUILD_TYPE=RelWithDebInfo
-	cmake --build $(BUILD)/daemon -j$(JOBS)
-
-test: all
-	ctest --test-dir $(BUILD)/exporter --output-on-failure
-	ctest --test-dir $(BUILD)/daemon --output-on-failure
-
-cli-test:
-	cd ros2ebpf && python3 -m pytest -q test
-
-install: all
-	cmake --install $(BUILD)/exporter
-	cmake --install $(BUILD)/daemon
-
-clean:
-	rm -rf $(BUILD)
-
 deb: $(BUILD)/COLCON_IGNORE      ## Debian packages into build/pkg (run natively or via in-docker-deb)
-	cmake -S ros2ebpf_exporter -B $(BUILD)/pkg-exporter -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DROS2EBPF_BUILD_TESTING=OFF
+	. $(ROS_SETUP) && cmake -S ros2ebpf_exporter -B $(BUILD)/pkg-exporter -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
 	cmake --build $(BUILD)/pkg-exporter -j$(JOBS)
 	cd $(BUILD)/pkg-exporter && cpack -G DEB
-	cmake -S ros2ebpf_daemon -B $(BUILD)/pkg-daemon -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DROS2EBPF_DAEMON_TESTING=OFF
+	cmake --install $(BUILD)/pkg-exporter --prefix $(CURDIR)/$(BUILD)/pkg-stage
+	. $(ROS_SETUP) && cmake -S ros2ebpf_daemon -B $(BUILD)/pkg-daemon -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF \
+	    -DCMAKE_PREFIX_PATH=$(CURDIR)/$(BUILD)/pkg-stage
 	cmake --build $(BUILD)/pkg-daemon -j$(JOBS)
 	cd $(BUILD)/pkg-daemon && cpack -G DEB
 	mkdir -p $(BUILD)/pkg && cp $(BUILD)/pkg-exporter/*.deb $(BUILD)/pkg-daemon/*.deb $(BUILD)/pkg/
 	ls -l $(BUILD)/pkg
 
 in-docker-deb: build-image
-	docker run --rm -v "$(CURDIR)":/src -w /src $(IMAGE_BUILD) make deb
+	$(DOCKER_RUN) make deb
 
 # ---- containers ------------------------------------------------------------
-build-image:                     ## toolchain image used by `make in-docker-*`
-	docker build -t $(IMAGE_BUILD) -f docker/Dockerfile.build docker
+build-image:                     ## toolchain image used by `make in-docker-*` (ros-base + clang/libbpf/bpftool)
+	docker build --build-arg ROS_DISTRO=$(ROS_DISTRO) -t $(IMAGE_BUILD) -f docker/Dockerfile.build docker
 
-in-docker-test: build-image      ## build + unit tests without installing clang/libbpf on the host
-	docker run --rm -v "$(CURDIR)":/src -w /src $(IMAGE_BUILD) make test cli-test
+in-docker-test: build-image      ## colcon build + tests without installing ROS/clang/libbpf on the host
+	$(DOCKER_RUN) make test cli-test
 
 image-daemon:
-	docker build -f docker/Dockerfile.daemon -t ros2ebpfd:local .
+	docker build --build-arg ROS_DISTRO=$(ROS_DISTRO) -f docker/Dockerfile.daemon -t ros2ebpfd:local .
 image-cli:
-	docker build -f docker/Dockerfile.cli -t ros2ebpf-cli:local .
+	docker build --build-arg ROS_DISTRO=$(ROS_DISTRO) -f docker/Dockerfile.cli -t ros2ebpf-cli:local .
 image-demo:
-	docker build -f docker/Dockerfile.demo -t ros2ebpf-demo:local .
+	docker build --build-arg ROS_DISTRO=$(ROS_DISTRO) -f docker/Dockerfile.demo -t ros2ebpf-demo:local .
 images: image-daemon image-cli image-demo
 
 e2e: images                      ## demo nodes in one container, daemon in another, assertions on /metrics

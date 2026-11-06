@@ -4,46 +4,55 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  ROS_DISTRO: jazzy
+
 jobs:
-  native:
-    name: exporter + daemon (C, BPF) and CLI (Python)
+  colcon:
+    name: colcon build + test (ament_cmake C/BPF packages, ament_python CLI)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: jazzy
       - name: Install toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev linux-tools-common linux-tools-generic \
-            libelf-dev zlib1g-dev libyaml-dev libjson-c-dev python3-yaml python3-pytest python3-flake8
+            build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev \
+            libelf-dev zlib1g-dev libyaml-dev libjson-c-dev python3-yaml python3-pytest python3-flake8 \
+            python3-colcon-common-extensions ros-${ROS_DISTRO}-ament-cmake ros-${ROS_DISTRO}-ros2cli
+          sudo sh docker/install-bpftool.sh
           sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
-          sudo ln -sf "$(ls -d /usr/lib/linux-tools/*/ | head -1)bpftool" /usr/local/bin/bpftool
-          bpftool version
-      - name: Build and test exporter
+      - name: colcon build
         run: |
-          cmake -S ros2ebpf_exporter -B build/exporter -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build/exporter -j"$(nproc)"
-          ctest --test-dir build/exporter --output-on-failure
-      - name: Build and test daemon
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          colcon build --merge-install --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Debug
+          install/bin/ros2ebpfd --version
+      - name: colcon test
         run: |
-          cmake -S ros2ebpf_daemon -B build/daemon -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build/daemon -j"$(nproc)"
-          ctest --test-dir build/daemon --output-on-failure
-          build/daemon/ros2ebpfd --version
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          colcon test --merge-install --event-handlers console_cohesion+
+          colcon test-result --verbose
+      - name: CLI lint
+        run: |
+          cd ros2ebpf
+          python3 -m flake8 --select=E,W,F --extend-ignore=W503 --max-line-length=120 ros2ebpf test
       - name: Load BPF objects on the runner kernel (verifier check)
         run: |
           sudo mount -t bpf bpf /sys/fs/bpf || true
-          sudo build/daemon/ros2ebpfd --check -c ros2ebpf_daemon/config/config.example.yaml || true
+          sudo install/bin/ros2ebpfd --check -c ros2ebpf_daemon/config/config.example.yaml || true
           printf 'shims: []\ndiscover_shims: true\nexporter: {listen: 127.0.0.1:19477}\ncontrol: {socket: /tmp/r2e.sock}\npin_root: /sys/fs/bpf/ros2ebpf-ci\n' > /tmp/ci.yaml
-          sudo timeout 10 build/daemon/ros2ebpfd -c /tmp/ci.yaml --log-level debug & sleep 4
-          sudo build/daemon/ros2ebpf-ctl -s /tmp/r2e.sock status
+          sudo timeout 10 install/bin/ros2ebpfd -c /tmp/ci.yaml --log-level debug & sleep 4
+          sudo install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status
           curl -sf http://127.0.0.1:19477/metrics | grep -E '^ros2ebpf_(build_info|map_abi)'
-          sudo build/daemon/ros2ebpf-ctl -s /tmp/r2e.sock metrics | grep -c '^ros2' 
-      - name: CLI unit tests and lint
+          sudo install/bin/ros2ebpf-ctl -s /tmp/r2e.sock metrics | grep -c '^ros2'
+      - name: Debian packages (cpack)
         run: |
-          cd ros2ebpf
-          python3 -m pytest -q test
-          python3 -m flake8 --max-line-length=120 ros2ebpf test
+          make deb
+          dpkg-deb -c build/pkg/ros2ebpf-daemon_*.deb | grep -E 'usr/bin/ros2ebpfd|usr/lib/systemd/system/ros2ebpfd.service|etc/ros2ebpf/config.example.yaml'
+          dpkg-deb -c build/pkg/ros2ebpf-exporter_*.deb | grep -E 'usr/lib/libros2ebpf_exporter.a|usr/include/ros2ebpf/maps.h'
 
   images:
     name: container images

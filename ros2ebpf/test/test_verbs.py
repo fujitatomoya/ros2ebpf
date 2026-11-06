@@ -91,8 +91,8 @@ def test_elf_parser_on_libc():
     if not libc:
         pytest.skip('no libc found')
     # find_library returns a soname; locate the file through the loader cache
-    candidates = [libc] + [os.path.join(d, libc) for d in ('/lib/x86_64-linux-gnu', '/lib/aarch64-linux-gnu',
-                                                             '/usr/lib64', '/lib64', '/usr/lib', '/lib')]
+    lib_dirs = ('/lib/x86_64-linux-gnu', '/lib/aarch64-linux-gnu', '/usr/lib64', '/lib64', '/usr/lib', '/lib')
+    candidates = [libc] + [os.path.join(d, libc) for d in lib_dirs]
     path = next((p for p in candidates if os.path.exists(p)), None)
     if not path:
         pytest.skip('cannot locate libc file')

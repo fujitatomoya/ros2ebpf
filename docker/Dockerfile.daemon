@@ -1,31 +1,37 @@
 # ros2ebpfd runtime image: daemon + exporter + ros2ebpf-ctl, no ROS inside.
 # Build from the repository root:  docker build -f docker/Dockerfile.daemon -t ros2ebpfd .
-FROM ubuntu:24.04 AS build
+# The build stage needs ament_cmake + colcon (ros-base); the runtime stage is plain Ubuntu.
+ARG ROS_DISTRO=jazzy
+FROM ros:${ROS_DISTRO}-ros-base AS build
+ARG ROS_DISTRO
 ENV DEBIAN_FRONTEND=noninteractive
+COPY docker/install-bpftool.sh /tmp/install-bpftool.sh
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev linux-tools-generic \
-      libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
+      build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev \
+      libelf-dev zlib1g-dev libyaml-dev libjson-c-dev ros-${ROS_DISTRO}-ament-cmake \
+    && sh /tmp/install-bpftool.sh \
     && rm -rf /var/lib/apt/lists/* \
-    && ln -sf /usr/bin/clang-18 /usr/local/bin/clang \
-    && ln -sf "$(ls -d /usr/lib/linux-tools/*/ | head -1)bpftool" /usr/local/bin/bpftool
+    && ln -sf /usr/bin/clang-18 /usr/local/bin/clang
 WORKDIR /src
 COPY ros2ebpf_exporter ros2ebpf_exporter
 COPY ros2ebpf_daemon ros2ebpf_daemon
 ARG BPF_TARGET_ARCH=
-RUN cmake -S ros2ebpf_exporter -B /b/exp -DCMAKE_BUILD_TYPE=Release -DROS2EBPF_BUILD_TESTING=OFF \
-    && cmake --build /b/exp -j"$(nproc)" && cmake --install /b/exp --prefix /opt/ros2ebpf \
-    && cmake -S ros2ebpf_daemon -B /b/d -DCMAKE_BUILD_TYPE=Release -DROS2EBPF_DAEMON_TESTING=OFF \
-         -DCMAKE_PREFIX_PATH=/opt/ros2ebpf ${BPF_TARGET_ARCH:+-DBPF_TARGET_ARCH=$BPF_TARGET_ARCH} \
-    && cmake --build /b/d -j"$(nproc)" && cmake --install /b/d --prefix /opt/ros2ebpf
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && colcon build --merge-install --install-base /opt/ros2ebpf --packages-up-to ros2ebpf_daemon \
+         --event-handlers console_cohesion+ \
+         --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF ${BPF_TARGET_ARCH:+-DBPF_TARGET_ARCH=$BPF_TARGET_ARCH}
 
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libbpf1 libelf1t64 zlib1g libyaml-0-2 libjson-c5 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /opt/ros2ebpf/ /usr/local/
+# binaries, example configs and the BPF objects / offsets helpers; the ament index and setup files are not needed
+COPY --from=build /opt/ros2ebpf/bin/ /usr/local/bin/
+COPY --from=build /opt/ros2ebpf/etc/ /usr/local/etc/
+COPY --from=build /opt/ros2ebpf/share/ros2ebpf_daemon/ /usr/local/share/ros2ebpf_daemon/
 COPY docker/entrypoint-daemon.sh /usr/local/bin/entrypoint.sh
-RUN ldconfig && mkdir -p /etc/ros2ebpf /run/ros2ebpf \
+RUN mkdir -p /etc/ros2ebpf /run/ros2ebpf \
     && cp /usr/local/etc/ros2ebpf/config.example.yaml /etc/ros2ebpf/config.example.yaml \
     && cp /usr/local/etc/ros2ebpf/expectations.example.yaml /etc/ros2ebpf/expectations.example.yaml
 EXPOSE 9477 9478
