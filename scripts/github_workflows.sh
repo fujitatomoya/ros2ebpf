@@ -66,6 +66,15 @@ function setup_colcon_env () {
     cd ${COLCON_WORKSPACE}
     # mainline source; rmw, rmw_implementation, ros2cli and demo_nodes_cpp with their dependencies are built below
     vcs import --shallow --input https://raw.githubusercontent.com/ros2/ros2/${ROS_DISTRO}/ros2.repos src
+    # One RMW (Fast DDS, the default) is all the daemon needs to be probed through; the other RMW
+    # implementations and their vendored middlewares (Zenoh's Rust build above all) cost most of
+    # the disk and time of a full build and do not fit a GitHub-hosted runner.
+    local skip
+    for skip in ros2/rmw_zenoh ros2/rmw_connextdds ros2/rmw_cyclonedds eclipse-cyclonedds/cyclonedds \
+                eclipse-iceoryx/iceoryx ros2/rmw_fastrtps/rmw_fastrtps_dynamic_cpp; do
+        [ -d "src/${skip}" ] && touch "src/${skip}/COLCON_IGNORE"
+    done
+    df -h /tmp | tail -1
     # move ros2ebpf directory to colcon workspace (without a previous local build)
     rm -rf ${COLCON_WORKSPACE}/src/ros2ebpf
     cp -rf $there ${COLCON_WORKSPACE}/src/ros2ebpf
@@ -76,11 +85,21 @@ function build_colcon_package () {
     trap exit_trap ERR
     echo "[${FUNCNAME[0]}]: build rmw, rmw_implementation, ros2cli, demo_nodes_cpp (mainline) and the ros2ebpf packages."
     cd ${COLCON_WORKSPACE}
-    # ros2ebpf (the CLI) depends on ros2cli, which pulls rclpy, rcl, rmw_implementation and the
-    # RMW implementations; demo_nodes_cpp adds rclcpp. That is the rolling source build the
-    # daemon is tested against below.
+    # Mainline first: ros2cli pulls rclpy, rcl and rmw_implementation (with Fast DDS),
+    # demo_nodes_cpp adds rclcpp. Release and no test targets keep it within the runner's disk;
+    # the build trees are dropped afterwards, install/ is all the rest needs.
+    # RMW_IMPLEMENTATION_DISABLE_RUNTIME_SELECTION=OFF: with a single RMW available,
+    # rmw_implementation would link to it directly and not build librmw_implementation.so, the
+    # library the daemon probes.
     colcon build --merge-install --event-handlers console_cohesion+ \
-        --packages-up-to rmw demo_nodes_cpp ${ROS2EBPF_PACKAGES} \
+        --packages-up-to rmw ros2cli demo_nodes_cpp \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+                     -DRMW_IMPLEMENTATION_DISABLE_RUNTIME_SELECTION=OFF
+    du -sh build install | tr '\n' ' '; echo; df -h /tmp | tail -1
+    rm -rf build
+    # then the ros2ebpf packages with their tests
+    colcon build --merge-install --event-handlers console_cohesion+ \
+        --packages-select ${ROS2EBPF_PACKAGES} \
         --cmake-args -DCMAKE_BUILD_TYPE=Debug
     ./install/bin/ros2ebpfd --version
 }
@@ -232,8 +251,8 @@ function end_to_end () {
     ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf status
     ROS2EBPF_SOCKET=/tmp/r2e.sock ros2 ebpf top --once
 
+    # only the processes started here: the container shares the host pid namespace
     kill ${DEMO_PIDS} ${DAEMON_PID} 2>/dev/null || true
-    pkill -f demo_nodes_cpp 2>/dev/null || true
     wait 2>/dev/null || true
     if [ "$fail" = 0 ]; then echo "e2e: all checks passed"; else echo "e2e: FAILED"; exit 1; fi
 }
