@@ -126,7 +126,7 @@ function start_daemon () {
     DAEMON_PID=$!
     local i
     for i in $(seq 1 30); do
-        if ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status -q 2>/dev/null; then
+        if ./install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status -q >/dev/null 2>&1; then
             echo "ros2ebpfd (pid ${DAEMON_PID}) healthy after ${i}s"
             return 0
         fi

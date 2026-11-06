@@ -44,12 +44,13 @@ jobs:
           docker run -d --name r2e-demo --network host -e ROS_DOMAIN_ID=5 ros2ebpf-demo:ci
           docker run -d --name r2e-daemon --pid host --privileged \
             -v /sys/fs/bpf:/sys/fs/bpf -v /sys/kernel/btf:/sys/kernel/btf:ro -e ROS2EBPF_HOST=ci ros2ebpfd:ci
-          for i in $(seq 1 30); do docker exec r2e-daemon ros2ebpf-ctl status -q 2>/dev/null && break; sleep 1; done
+          for i in $(seq 1 30); do docker exec r2e-daemon ros2ebpf-ctl status -q >/dev/null 2>&1 && break; sleep 1; done
           docker logs r2e-daemon
           docker exec r2e-daemon ros2ebpf-ctl status -q
           sleep 5
-          docker exec r2e-daemon ros2ebpf-ctl metrics | grep -E '^ros2_rmw_publish_total\{host="ci",domain_id="5",comm="talker",topic="/chatter"\} [1-9]'
-          docker exec r2e-daemon ros2ebpf-ctl metrics | grep -E '^ros2ebpf_host_info\{.*offset_table="rolling/'
+          docker exec r2e-daemon ros2ebpf-ctl metrics | grep -E '^ros2(ebpf_host_info|_rmw_publish_total)\{' | tee /tmp/metrics.txt
+          grep -E '^ros2_rmw_publish_total\{host="ci",domain_id="5",comm="talker",topic="/chatter"\} [1-9]' /tmp/metrics.txt
+          grep -E '^ros2ebpf_host_info\{.*shim_path="/proc/[0-9]+/root/opt/ros/rolling/.*offset_table="rolling/' /tmp/metrics.txt
           docker rm -f r2e-demo r2e-daemon
 
   deploy-lint:
