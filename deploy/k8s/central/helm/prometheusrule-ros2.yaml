@@ -1,4 +1,4 @@
-# Generated from deploy/prometheus/rules/ros2.yaml (make k8s-rules)
+# Generated from deploy/prometheus/rules/ros2.yaml (deploy/k8s/sync.sh)
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

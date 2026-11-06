@@ -1,7 +1,0 @@
-#!/bin/sh
-set -e
-if [ "$1" = remove ] && command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-    systemctl stop ros2ebpfd 2>/dev/null || true
-    systemctl disable ros2ebpfd 2>/dev/null || true
-fi
-exit 0

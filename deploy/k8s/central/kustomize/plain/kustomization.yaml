@@ -5,7 +5,7 @@ resources:
   - prometheus.yaml
   - alertmanager.yaml
   - grafana.yaml
-# files/ is a copy of deploy/prometheus and deploy/grafana made by `make k8s-sync`
+# files/ is a copy of deploy/prometheus and deploy/grafana made by `deploy/k8s/sync.sh`
 # (kustomize refuses to read files outside the kustomization directory).
 configMapGenerator:
   - name: prometheus-config

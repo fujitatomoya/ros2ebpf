@@ -8,45 +8,51 @@ colcon workspace by itself (`build/`, `install/`, `log/` are git-ignored); it ca
 `src/` of a larger workspace. The daemon and exporter use ament only at build time: nothing from
 ROS is needed on the host they run on.
 
-Native (Ubuntu 24.04, ROS 2 Jazzy or newer):
+ros2ebpf follows ROS 2 **Rolling** only: everything (implementation, CI, documentation) tracks
+Rolling, CI tests against a Rolling source build, and a distro branch is created when the next ROS
+release is branched. Nothing is backported before that.
+
+Native (Ubuntu 26.04, ROS 2 Rolling binaries):
 
 ```bash
-sudo apt install -y build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev \
-     linux-tools-common linux-tools-generic libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
+sudo apt install -y build-essential cmake pkg-config clang llvm libbpf-dev bpftool \
+     libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
      python3-yaml python3-pytest python3-flake8 \
-     ros-jazzy-ament-cmake ros-jazzy-ros2cli python3-colcon-common-extensions
-sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
-sudo ln -sf "$(ls -d /usr/lib/linux-tools/*/ | head -1)bpftool" /usr/local/bin/bpftool
-# (if apt refuses linux-tools-generic while the mirrors are syncing: sudo sh docker/install-bpftool.sh)
-source /opt/ros/jazzy/setup.bash
+     ros-rolling-ament-cmake ros-rolling-ros2cli python3-colcon-common-extensions
+source /opt/ros/rolling/setup.bash
 colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 colcon test --merge-install && colcon test-result --verbose
 ```
 
-`make all test cli-test` wraps the same calls (`ROS_DISTRO=jazzy` by default; the Makefile sources
-`/opt/ros/$ROS_DISTRO/setup.sh` itself). `--merge-install` gives one prefix (`install/bin`,
-`install/etc/ros2ebpf`, `install/lib/systemd/system`) that the tutorials and the container images
-rely on; without it every package gets its own prefix under `install/<pkg>/`.
+`--merge-install` gives one prefix (`install/bin`, `install/etc/ros2ebpf`,
+`install/lib/systemd/system`) that the tutorials and the container images rely on; without it every
+package gets its own prefix under `install/<pkg>/`.
 
 `rosdep install --from-paths . --ignore-src -y --skip-keys "libbpf-dev bpftool"` resolves the
 remaining dependencies; `libbpf-dev` and `bpftool` have no rosdep key yet (see Packaging below)
 and are installed by hand as above.
 
-In the toolchain container (nothing installed on the host, runs as your user):
+Exactly what CI runs, with nothing installed on the host (privileged for the BPF programs):
 
 ```bash
-make build-image            # docker/Dockerfile.build -> ros2ebpf-build:local (ros-base + clang/libbpf/bpftool)
-make in-docker-test         # colcon build + test + flake8 inside it, build/ install/ log/ on the host
+docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh
 ```
+
+That is the Rolling *source* build: `scripts/github_workflows.sh` imports `ros2.repos` of mainline
+and builds `rmw`, `rmw_implementation`, `ros2cli` and `demo_nodes_cpp` with everything they need
+(about 170 packages, a few minutes on a workstation) plus the ros2ebpf packages with colcon. It then
+runs the unit tests and flake8, checks the offset table in `ros2ebpf_daemon/src/offsets.c` against
+the mainline `rmw` headers (`offsets/gen.sh`), starts the daemon on the kernel with its uprobes
+attached to the mainline-built `librmw_implementation.so` (all probe links must attach and the
+`rolling/<arch>` offset table must be in use), runs `ros2 ebpf` on the mainline ros2cli against it,
+and runs the end-to-end test with the mainline demo nodes (docs/testing.md). The image comes from
+[ros2_devenv_builder](https://github.com/fujitatomoya/ros2_devenv_builder) and carries every ROS
+build dependency; the script adds the BPF toolchain.
 
 Build options (`--cmake-args`): `-DBUILD_TESTING=OFF` skips the unit tests, `-DBPF_TARGET_ARCH=arm64`
 cross-compiles the BPF objects. The C tests are registered with `ament_add_test`, so
 `colcon test-result` sees them like any other ROS package's tests.
 
-The in-tree build directories of the Debian package build (`make deb`, plain cmake under `build/`)
-are marked with `COLCON_IGNORE` so the staged copies of `package.xml` under
-`build/*/_CPack_Packages/` never show up as duplicate packages; colcon marks its own build base the
-same way.
 
 Cross build for aarch64: `-DBPF_TARGET_ARCH=arm64` for the BPF objects plus a normal CMake
 toolchain file for the user-space parts; `docker buildx build --platform linux/arm64 -f
@@ -118,34 +124,26 @@ read from offset 0: if it does not start with `rmw_`, the row is wrong for that 
 methods are added to `handle_rpc()` in `main.c`, to the schema, and get a verb (or an option of
 one) in the CLI.
 
-## Packaging
+## Releasing
 
-Debian packages with CPack (built on the target architecture, or in the toolchain container with
-`make in-docker-deb`). They install under `/usr` and `/etc`, for hosts without ROS:
+The packages are source packages; binaries come from the ROS build farm (bloom release, then
+`ros-<distro>-ros2ebpf-*` under `/opt/ros/<distro>`) like for any ROS 2 package, and nothing is
+packaged in this repository. Prerequisite: rosdep keys for `libbpf-dev` and `bpftool` (a
+`ros/rosdistro` pull request); until they exist `rosdep install` needs
+`--skip-keys "libbpf-dev bpftool"`. The daemon links the exporter library statically, installs the
+systemd unit with the absolute daemon path of its prefix to `lib/systemd/system/` and the example
+configs to `etc/ros2ebpf/`; the daemon itself reads `/etc/ros2ebpf/config.yaml`.
 
-```bash
-make deb                    # build/pkg/ros2ebpf-daemon_0.1.0_amd64.deb   (ros2ebpfd, ros2ebpf-ctl, unit, example configs)
-                            # build/pkg/ros2ebpf-exporter_0.1.0_amd64.deb (static library + headers + standalone exporter)
-sudo apt install ./build/pkg/ros2ebpf-daemon_0.1.0_amd64.deb
-```
-
-The daemon links the exporter library statically, so `ros2ebpf-daemon` does not depend on
-`ros2ebpf-exporter`; install that one only for the standalone binary / headers. The unit is
-installed as `/usr/lib/systemd/system/ros2ebpfd.service` with `ExecStart=/usr/bin/ros2ebpfd`.
-`postinst` creates the `ros2ebpf` group and runs `systemctl daemon-reload`; it does not enable the
-unit. Container images: `docker/Dockerfile.daemon`, `docker/Dockerfile.cli` (`make images`).
-
-Releasing through bloom / the ROS build farm (`ros-<distro>-ros2ebpf-*` packages under
-`/opt/ros/<distro>`) is the ROS-native route for all four packages and needs rosdep keys for
-`libbpf-dev` and `bpftool` first (a `ros/rosdistro` pull request); until then `rosdep` needs
-`--skip-keys "libbpf-dev bpftool"`. The CLI can also be installed with `pip install ./ros2ebpf`.
+Container images for the deployments under `deploy/`: `docker/Dockerfile.daemon` (daemon + exporter
++ ctl on Ubuntu 26.04, built from rolling binaries), `docker/Dockerfile.cli`, `docker/Dockerfile.demo`.
 
 ## Deploy sources of truth
 
-`deploy/prometheus/` and `deploy/grafana/` are the sources; `make k8s-sync` copies them into
+`deploy/prometheus/` and `deploy/grafana/` are the sources; `deploy/k8s/sync.sh` copies them into
 `deploy/k8s/central/kustomize/plain/files/` (kustomize cannot read outside its directory) and
 regenerates `deploy/k8s/central/helm/prometheusrule-ros2.yaml`. Run it after editing rules or
-dashboards and commit the result; `make lint` runs it and validates everything.
+dashboards and commit the result; the `deploy-lint` CI job runs it and fails on a stale copy, then
+validates everything with promtool, amtool, kustomize, `docker compose config` and `alloy fmt`.
 
 ## Branches
 
@@ -157,8 +155,20 @@ distro, and nothing is backported before that.
 
 ## CI
 
-`.github/workflows/ci.yaml`: ROS 2 Jazzy via `ros-tooling/setup-ros`, `colcon build` + `colcon test`
-of all packages, flake8 for the CLI, a real load of the BPF objects on the runner kernel (verifier
-check, `/metrics` smoke test), the Debian package build, container image builds with a privileged
-smoke test, and validation of everything under `deploy/` (promtool, amtool, kustomize, compose,
-alloy fmt).
+`.github/workflows/ci.yaml`, rolling only:
+
+- `rolling`: `scripts/github_workflows.sh` inside the `tomoyafujita/ros2dev:rolling` container
+  (privileged): Rolling source build of `rmw` / `rmw_implementation` / `ros2cli` /
+  `demo_nodes_cpp`, `colcon build` + `colcon test` of all packages, flake8, offset table vs.
+  mainline `rmw`, the daemon probing the mainline `librmw_implementation.so` (BPF verifier, all
+  links attached), `ros2 ebpf` on mainline ros2cli, and the end-to-end test with the mainline demo
+  nodes. The workflow file only calls the script, so CI changes are script changes that run
+  identically with the `docker run` above.
+- `images`: the daemon, CLI and demo images on Rolling binaries (`ros:rolling-*`, Ubuntu 26.04),
+  `ros2 ebpf --help` in the CLI image, and the daemon in its own container discovering the demo
+  container's shim through `/proc` (README tutorial C).
+- `deploy-lint`: `deploy/k8s/sync.sh` must leave no diff, then validation of everything under
+  `deploy/` (promtool, amtool, kustomize, compose, alloy fmt).
+
+When a release branch is created, its workflow is a copy of the `rolling` job with the
+distro's `ros2dev` image, as in the other `fujitatomoya` repositories.

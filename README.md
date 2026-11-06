@@ -82,8 +82,8 @@ deploy/docker-compose/    bench: daemon + Alloy + Prometheus + Alertmanager + Gr
 deploy/k8s/               robot DaemonSet + Alloy; central Prometheus/Alertmanager/Grafana (kustomize, helm values)
 deploy/prometheus/        prometheus.yml, rules/ros2.yaml (alerts), alertmanager.yml
 deploy/grafana/           provisioning + dashboards: fleet, robot, host, daemon health
-docker/                   Dockerfile.build (toolchain), .daemon, .cli, .demo
-scripts/e2e.sh            container end-to-end test
+docker/                   Dockerfile.daemon, .cli, .demo (deployment images, rolling binaries)
+scripts/github_workflows.sh   CI: rolling source build, unit tests, end-to-end (runs locally in the ros2dev container too)
 docs/                     design.md, metrics.md, deployment.md, development.md, testing.md
 ```
 
@@ -101,43 +101,42 @@ Probed host (robot computer):
 
 Build host (can be the same machine, or the Docker toolchain image):
 
-- Ubuntu 24.04 with ROS 2 (Jazzy or newer) for `ament_cmake` and `colcon`; the packages are built
-  like any other ROS 2 workspace. The daemon and exporter still do not use ROS at runtime.
-- `clang-18`, `libbpf-dev` (≥ 1.0), `bpftool` (from `linux-tools-generic`), `cmake`,
-  `libyaml-dev`, `libjson-c-dev`, `libelf-dev`, `zlib1g-dev`.
-- Ubuntu 22.04 ships libbpf 0.5, which is too old: build on 24.04, use the `ros2ebpfd` container
-  image, or build libbpf ≥ 1.3 from source first.
+- ros2ebpf follows **ROS 2 Rolling** only: it is built and tested against Rolling (CI builds
+  mainline from source), and a distro branch is created when the next release is branched. The
+  build needs `ament_cmake` and `colcon` from a Rolling install (binary or source); the packages
+  are built like any other ROS 2 workspace. The daemon and exporter still do not use ROS at runtime.
+- Ubuntu 26.04: `clang`, `llvm`, `libbpf-dev` (≥ 1.0), `bpftool`, `cmake`, `libyaml-dev`,
+  `libjson-c-dev`, `libelf-dev`, `zlib1g-dev`.
+- Ubuntu 22.04 ships libbpf 0.5, which is too old: build on 24.04 or newer, use the `ros2ebpfd`
+  container image, or build libbpf ≥ 1.3 from source first.
 
 `ros2 ebpf doctor` prints all of this for the host it runs on.
 
 ## 4. Tutorial A: host-only install (systemd)
 
 Everything on one machine, no containers: ROS 2 nodes on the host, daemon as a systemd service,
-Prometheus scraping it directly. Commands were verified on Ubuntu 24.04 with ROS 2 Jazzy.
+Prometheus scraping it directly. The commands target Ubuntu 26.04 with ROS 2 Rolling binaries.
 
 ### 4.1 Build and install the daemon and exporter
 
 ```bash
-sudo apt install -y build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev \
-     linux-tools-common linux-tools-generic libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
-     ros-jazzy-ament-cmake python3-colcon-common-extensions
-sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
-# bpftool: the wrapper in linux-tools-common needs a matching kernel package; link a real one
-sudo ln -sf "$(ls -d /usr/lib/linux-tools/*/ | head -1)bpftool" /usr/local/bin/bpftool
+sudo apt install -y build-essential cmake pkg-config clang llvm libbpf-dev bpftool \
+     libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
+     ros-rolling-ament-cmake python3-colcon-common-extensions
 
 git clone https://github.com/fujitatomoya/ros2ebpf.git
 cd ros2ebpf
-source /opt/ros/jazzy/setup.bash
-colcon build --merge-install --packages-up-to ros2ebpf_daemon    # or: make all
-colcon test --merge-install && colcon test-result --verbose      # or: make test
+source /opt/ros/rolling/setup.bash
+colcon build --merge-install --packages-up-to ros2ebpf_daemon
+colcon test --merge-install && colcon test-result --verbose
 # install/bin/{ros2ebpfd,ros2ebpf-ctl,ros2ebpf-exporter}, install/lib/systemd/system/ros2ebpfd.service
 # (ExecStart already points at this install/), install/etc/ros2ebpf/*.example.yaml
 ```
 
 The repository is a colcon workspace on its own; it can equally be cloned into `src/` of an
-existing one. To install system-wide, build a Debian package instead (`make deb`, see
-[docs/development.md](docs/development.md)): `/usr/bin/ros2ebpfd`, `/usr/lib/systemd/system/ros2ebpfd.service`,
-`/etc/ros2ebpf/*.example.yaml`.
+existing one. Binary packages come from the ROS build farm like for any ROS 2 package once the
+packages are released there (`ros-rolling-ros2ebpf-daemon`); until then the workspace `install/` is
+what runs on the host.
 
 ### 4.2 Configure
 
@@ -152,7 +151,7 @@ The minimum to edit is the shim path for your distro:
 
 ```yaml
 shims:
-  - path: /opt/ros/jazzy/lib/librmw_implementation.so
+  - path: /opt/ros/rolling/lib/librmw_implementation.so
 ```
 
 Leave `discover_shims: true` (the default) and ROS processes in containers are found too. Set
@@ -169,7 +168,7 @@ sudo ros2ebpfd --check -c /etc/ros2ebpf/config.yaml      # config parses, shim e
 ```bash
 sudo groupadd -f ros2ebpf && sudo usermod -aG ros2ebpf "$USER"   # lets your user talk to the control socket
 sudo cp install/lib/systemd/system/ros2ebpfd.service /etc/systemd/system/   # ExecStart=<this clone>/install/bin/ros2ebpfd
-sudo systemctl daemon-reload                                                 # (the .deb installs the unit itself)
+sudo systemctl daemon-reload
 sudo systemctl enable --now ros2ebpfd
 sudo systemctl status ros2ebpfd --no-pager
 journalctl -u ros2ebpfd -n 20 --no-pager
@@ -178,15 +177,15 @@ journalctl -u ros2ebpfd -n 20 --no-pager
 Expected log lines:
 
 ```
-I ros2ebpfd 0.1.0 starting: host=main machine_id=… distro=ubuntu-24.04 arch=x86_64 kernel=6.8.0-…
-I shim /opt/ros/jazzy/lib/librmw_implementation.so: distro=jazzy arch=x86_64 dev=… ino=… (config)
+I ros2ebpfd 0.1.0 starting: host=main machine_id=… distro=ubuntu-26.04 arch=x86_64 kernel=7.0.0-…
+I shim /opt/ros/rolling/lib/librmw_implementation.so: distro=rolling arch=x86_64 dev=… ino=… (config)
 I probe family publish enabled: 2/2 links
 I probe family take enabled: 2/2 links
 I probe family services enabled: 6/6 links
 I probe family udp_drops enabled
 I metrics at http://0.0.0.0:9477/metrics
 I control socket at /run/ros2ebpf/control.sock (group ros2ebpf)
-I ready: 16/16 probe links attached, 1 shim(s), offset table jazzy/x86_64
+I ready: 16/16 probe links attached, 1 shim(s), offset table rolling/x86_64
 ```
 
 To run in the foreground instead: `sudo install/bin/ros2ebpfd -c /etc/ros2ebpf/config.yaml --log-level debug`.
@@ -196,7 +195,7 @@ To run in the foreground instead: `sudo install/bin/ros2ebpfd -c /etc/ros2ebpf/c
 The CLI is a normal ROS 2 Python package in the same workspace:
 
 ```bash
-colcon build --merge-install --packages-select ros2ebpf     # or: make cli
+colcon build --merge-install --packages-select ros2ebpf
 source install/setup.bash
 ros2 ebpf --help
 ```
@@ -303,14 +302,16 @@ Tear down: `docker compose --profile demo --profile tools down -v`.
 
 ## 6. Tutorial C: daemon in a container, nodes anywhere
 
-This is the "prove it attaches from outside" case, and what `scripts/e2e.sh` automates. The
-daemon runs in its own container and observes ROS 2 nodes that run (a) in another container and
-(b) on the host.
+This is the "prove it attaches from outside" case, and what the `images` job of CI checks on
+every commit. The daemon runs in its own container and observes ROS 2 nodes that run (a) in another
+container and (b) on the host.
 
 ```bash
-make images                                   # ros2ebpfd:local, ros2ebpf-cli:local, ros2ebpf-demo:local
+docker build -f docker/Dockerfile.daemon -t ros2ebpfd:local .     # the images, on rolling binaries
+docker build -f docker/Dockerfile.cli -t ros2ebpf-cli:local .
+docker build -f docker/Dockerfile.demo -t ros2ebpf-demo:local .
 
-# (a) ROS 2 nodes in their own container (Jazzy, domain 5)
+# (a) ROS 2 nodes in their own container (Rolling, domain 5)
 docker run -d --name demo --network host -e ROS_DOMAIN_ID=5 ros2ebpf-demo:local
 
 # the daemon, with no config file at all: discovery finds the demo container's shim
@@ -319,8 +320,8 @@ docker run -d --name ros2ebpfd --pid host --privileged \
   -v ros2ebpf-run:/run/ros2ebpf -p 9477:9477 -e ROS2EBPF_HOST=$(hostname) ros2ebpfd:local
 
 docker logs ros2ebpfd
-#  I shim /proc/431/root/opt/ros/jazzy/lib/librmw_implementation.so: distro=jazzy arch=x86_64 … (discovered)
-#  I ready: 16/16 probe links attached, 1 shim(s), offset table jazzy/x86_64
+#  I shim /proc/431/root/opt/ros/rolling/lib/librmw_implementation.so: distro=rolling arch=x86_64 … (discovered)
+#  I ready: 16/16 probe links attached, 1 shim(s), offset table rolling/x86_64
 #  I pid 4312: comm=talker domain_id=5 rmw=- container=fb6f819f393f
 
 # (b) a node on the host, if ROS 2 is installed there: found the same way within 5 s
@@ -335,8 +336,10 @@ The `container` label of `ros2_process_info` carries the container id, `domain_i
 `ROS_DOMAIN_ID`, and the shim entry in `status` shows `discovered`. Two containers from the same
 image share one inode and therefore one set of probes; no double counting.
 
-`./scripts/e2e.sh` runs this scenario and asserts on the metrics (counters present and growing,
-`/rosout` excluded, identity labels, exit sweeps, enable/disable, counters surviving a daemon restart).
+CI runs this scenario on every commit (`images` job); the full end-to-end assertions (counters
+present and growing, `/rosout` excluded, identity labels, exit sweeps, enable/disable, counters
+surviving a daemon restart) run in the `rolling` job against a mainline source build, see
+[docs/testing.md](docs/testing.md).
 
 ## 7. Configuration
 
@@ -471,15 +474,15 @@ Details and the rationale behind each decision: [docs/design.md](docs/design.md)
 
 ## 12. Development and testing
 
-- [docs/development.md](docs/development.md): building natively or in the toolchain container,
-  code layout, the map ABI contract, adding probes, offsets, Debian packaging, CI.
-- [docs/testing.md](docs/testing.md): unit tests (C and Python), the container end-to-end test,
-  and the manual multi-host test plan.
+- [docs/development.md](docs/development.md): building, code layout, the map ABI contract, adding
+  probes, offsets, releasing, CI.
+- [docs/testing.md](docs/testing.md): unit tests (C and Python), the end-to-end test that CI runs
+  on every commit, and the manual multi-host test plan.
+
+Everything CI does, locally, against a ROS 2 Rolling source build (privileged for the BPF programs):
 
 ```bash
-make build-image in-docker-test     # colcon build + all unit tests inside the toolchain container (no ROS on the host)
-make images e2e                     # container end-to-end test (needs Docker, a BTF kernel, bpffs)
-make lint                           # promtool / amtool / kustomize / compose validation of deploy/
+docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh
 ```
 
 License: Apache-2.0.

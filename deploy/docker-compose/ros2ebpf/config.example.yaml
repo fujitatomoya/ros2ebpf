@@ -2,7 +2,7 @@
 # config.yaml the container generates a minimal one (discovery on).
 host: ""                       # "" = kernel hostname (the compose file also sets ROS2EBPF_HOST)
 robot: ""                      # set by Alloy's external label instead
-shims: []                      # host ROS install? add: - path: /opt/ros/jazzy/lib/librmw_implementation.so (and mount /opt/ros:ro)
+shims: []                      # host ROS install? add: - path: /opt/ros/rolling/lib/librmw_implementation.so (and mount /opt/ros:ro)
 discover_shims: true           # finds shims in the demo container and on the host via /proc/<pid>/maps
 identity: {read_environ: true, default_domain_id: 0}
 probes: {publish: true, take: true, services: true, udp_drops: true, seq_gap: [/chatter]}

@@ -191,6 +191,15 @@ static int do_reload(struct daemon *d, char *msg, size_t n)
 
 static struct json_object *jstr(const char *s) { return json_object_new_string(s ? s : ""); }
 
+/* The exporter's ros2ebpf_host_info labels (offset table, first shim path) follow the probe
+ * state: refreshed at start and whenever discovery attaches a shim later. */
+static void host_info_sync_shims(struct daemon *d)
+{
+    snprintf(d->hi.offset_table, sizeof(d->hi.offset_table), "%s", d->probes.offset_table);
+    if (d->probes.n_shims)
+        snprintf(d->hi.shim_path, sizeof(d->hi.shim_path), "%s", d->probes.shims[0].path);
+}
+
 static struct json_object *status_json(struct daemon *d)
 {
     struct probes *p = &d->probes;
@@ -480,6 +489,7 @@ static int handle_rpc(void *ctx, const char *method, struct json_object *params,
     }
     if (!strcmp(method, "discover")) {
         int n = d->cfg.discover_shims ? probes_discover_shims(&d->probes, d->host_arch) : 0;
+        host_info_sync_shims(d);
         *result = json_object_new_object();
         json_object_object_add(*result, "new_shims", json_object_new_int(n));
         return 0;
@@ -580,7 +590,7 @@ int main(int argc, char **argv)
     int rc = probes_open_load(&d.probes, &d.cfg, on_event, &d);
     if (rc)
         return 1;
-    snprintf(d.hi.offset_table, sizeof(d.hi.offset_table), "%s", d.probes.offset_table);
+    host_info_sync_shims(&d);
 
     d.ident.cfg = &d.cfg;
     struct ros2ebpf_maps m;
@@ -594,10 +604,8 @@ int main(int argc, char **argv)
     probes_add_config_shims(&d.probes, &d.cfg, d.host_arch);
     if (d.cfg.discover_shims)
         probes_discover_shims(&d.probes, d.host_arch);
-    snprintf(d.hi.offset_table, sizeof(d.hi.offset_table), "%s", d.probes.offset_table);
-    if (d.probes.n_shims)
-        snprintf(d.hi.shim_path, sizeof(d.hi.shim_path), "%s", d.probes.shims[0].path);
-    else
+    host_info_sync_shims(&d);
+    if (!d.probes.n_shims)
         log_warn("no librmw_implementation.so found yet (config shims: %d, discovery: %s); "
                  "will keep scanning /proc for ROS 2 processes", d.cfg.n_shims,
                  d.cfg.discover_shims ? "on" : "off");
@@ -690,8 +698,8 @@ int main(int argc, char **argv)
                 __u64 exp;
                 read(tfd, &exp, sizeof(exp));
                 ticks++;
-                if (d.cfg.discover_shims)
-                    probes_discover_shims(&d.probes, d.host_arch);
+                if (d.cfg.discover_shims && probes_discover_shims(&d.probes, d.host_arch) > 0)
+                    host_info_sync_shims(&d);       /* host_info labels follow a late discovery */
                 if (ticks % 6 == 0)                 /* every 30 s */
                     identity_gc(&d.ident);
                 break;

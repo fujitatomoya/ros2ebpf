@@ -57,21 +57,6 @@ install(DIRECTORY include/ DESTINATION include)
 ament_export_include_directories(include)
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 
-# Keep colcon from crawling this build tree (cpack stages package.xml under _CPack_Packages/).
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/COLCON_IGNORE "")
 
-# ---- Debian package (cpack -G DEB, see `make deb`) ------------------------
-set(CPACK_GENERATOR DEB)
-set(CPACK_PACKAGE_NAME ros2ebpf-exporter)
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_PACKAGE_CONTACT "Tomoya Fujita <fujita.tomoya@triorb.co.jp>")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "ros2ebpf exporter library, headers and standalone ros2ebpf-exporter")
-set(CPACK_DEBIAN_PACKAGE_SECTION libs)
-set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libbpf1 (>= 1:1.0), libelf1t64 | libelf1, zlib1g, libc6")
-set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
-set(CPACK_SET_DESTDIR ON)
-include(CPack)
 
 ament_package()

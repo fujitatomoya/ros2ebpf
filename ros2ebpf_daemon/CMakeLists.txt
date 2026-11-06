@@ -19,7 +19,7 @@ pkg_check_modules(JSONC REQUIRED IMPORTED_TARGET json-c)
 set(EXPORTER_INCLUDE ${ros2ebpf_exporter_INCLUDE_DIRS})
 
 # ---- BPF objects + skeletons ------------------------------------------------
-find_program(BPF_CLANG NAMES clang clang-18 clang-17 clang-16 clang-15 REQUIRED)
+find_program(BPF_CLANG NAMES clang clang-21 clang-20 clang-19 clang-18 clang-17 clang-16 clang-15 REQUIRED)
 find_program(BPFTOOL NAMES bpftool REQUIRED)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
@@ -84,44 +84,20 @@ endif()
 install(TARGETS ros2ebpfd ros2ebpf-ctl RUNTIME DESTINATION bin)
 install(TARGETS ros2ebpfd ros2ebpf-ctl RUNTIME DESTINATION lib/${PROJECT_NAME})
 
-# systemd unit with the absolute daemon path of this install prefix:
-# /usr/bin/ros2ebpfd in the Debian package, <workspace>/install/bin/ros2ebpfd for a colcon build.
+# systemd unit with the absolute daemon path of this install prefix
+# (<workspace>/install/bin/ros2ebpfd for a colcon build, /opt/ros/<distro>/bin/ros2ebpfd from the build farm).
 set(ROS2EBPFD_BIN ${CMAKE_INSTALL_PREFIX}/bin/ros2ebpfd)
 configure_file(systemd/ros2ebpfd.service.in ${CMAKE_CURRENT_BINARY_DIR}/ros2ebpfd.service @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ros2ebpfd.service DESTINATION lib/systemd/system)
 
-# /etc/ros2ebpf with prefix /usr (Debian package), <prefix>/etc/ros2ebpf otherwise (colcon install/, images)
-if(CMAKE_INSTALL_PREFIX MATCHES "^/usr/?$")
-  set(ROS2EBPF_SYSCONFDIR /etc)
-else()
-  set(ROS2EBPF_SYSCONFDIR etc)
-endif()
+# example configs: <prefix>/etc/ros2ebpf (the daemon reads /etc/ros2ebpf/config.yaml)
 install(FILES config/config.example.yaml config/expectations.example.yaml
-  DESTINATION ${ROS2EBPF_SYSCONFDIR}/ros2ebpf)
+  DESTINATION etc/ros2ebpf)
 install(PROGRAMS offsets/gen.sh DESTINATION share/${PROJECT_NAME}/offsets)
 install(FILES offsets/README.md DESTINATION share/${PROJECT_NAME}/offsets)
 install(FILES ${GEN_DIR}/rmw_probes.bpf.o ${GEN_DIR}/udp_drops.bpf.o
   DESTINATION share/${PROJECT_NAME}/bpf)
 
-# Keep colcon from crawling this build tree: cpack stages a copy of package.xml under
-# _CPack_Packages/, which otherwise shows up as a duplicate package when the build
-# directory lives inside a colcon workspace (fujitatomoya/ros2ebpf#1).
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/COLCON_IGNORE "")
 
-# ---- Debian package (cpack -G DEB, see `make deb`) ------------------------
-set(CPACK_GENERATOR DEB)
-set(CPACK_PACKAGE_NAME ros2ebpf-daemon)
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_PACKAGE_CONTACT "Tomoya Fujita <fujita.tomoya@triorb.co.jp>")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "ROS 2 endpoint statistics via eBPF: ros2ebpfd and ros2ebpf-ctl")
-set(CPACK_DEBIAN_PACKAGE_SECTION admin)
-set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libbpf1 (>= 1:1.0), libelf1t64 | libelf1, zlib1g, libyaml-0-2, libjson-c5, libc6")
-set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/debian/postinst;${CMAKE_CURRENT_SOURCE_DIR}/debian/prerm")
-set(CPACK_DEBIAN_PACKAGE_CONFFILES "")
-set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
-set(CPACK_SET_DESTDIR ON)
-include(CPack)
 
 ament_package()
