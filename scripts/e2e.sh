@@ -1,11 +1,12 @@
 #!/bin/bash
 # End-to-end test with containers only:
-#   - r2e-demo:   ROS 2 (demo_nodes_cpp talker/listener/add_two_ints) in its own container
+#   - r2e-demo:   ROS 2 rolling (demo_nodes_cpp talker/listener/add_two_ints) in its own container
 #   - r2e-daemon: ros2ebpfd in another container, host pid namespace, attaching to the
 #                 demo container's librmw_implementation.so through /proc/<pid>/root
 # Asserts that publish / take / service counters for the demo nodes appear and grow.
 set -euo pipefail
 DOMAIN=${ROS_DOMAIN_ID:-5}
+DISTRO=${ROS_DISTRO:-rolling}   # distro of the demo image (docker/Dockerfile.demo), used for the offset table label
 cleanup() { docker rm -f r2e-demo r2e-daemon >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 cleanup
@@ -38,7 +39,7 @@ check "publish period histogram has samples"        "^ros2_rmw_publish_period_se
 check "/rosout excluded by default"                 "^ros2ebpf_map_entries"   # presence; exclusion checked below
 if m | grep -q 'topic="/rosout"'; then echo "FAIL /rosout should be excluded"; fail=1; else echo "PASS /rosout excluded"; fi
 check "process identity with container id"         "^ros2_process_info\{host=\"e2e\",comm=\"talker\",pid=\"[0-9]+\",domain_id=\"$DOMAIN\",rmw=\"rmw_[a-z_]+\",container=\"[0-9a-f]{12}\""
-check "host info with discovered offset table"     "^ros2ebpf_host_info\{.*offset_table=\"jazzy/[a-z0-9_]+\""
+check "host info with discovered offset table"     "^ros2ebpf_host_info\{.*offset_table=\"$DISTRO/[a-z0-9_]+\""
 check "all configured probes attached"             "^ros2ebpf_probes_attached\{host=\"e2e\"\} ([0-9]+)$"
 att=$(val 'ros2ebpf_probes_attached{host="e2e"}'); cfg=$(val 'ros2ebpf_probes_configured{host="e2e"}')
 if [ "$att" = "$cfg" ]; then echo "PASS probes attached == configured ($att)"; else echo "FAIL probes attached $att != configured $cfg"; fail=1; fi

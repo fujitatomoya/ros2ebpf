@@ -19,7 +19,7 @@ pkg_check_modules(JSONC REQUIRED IMPORTED_TARGET json-c)
 set(EXPORTER_INCLUDE ${ros2ebpf_exporter_INCLUDE_DIRS})
 
 # ---- BPF objects + skeletons ------------------------------------------------
-find_program(BPF_CLANG NAMES clang clang-18 clang-17 clang-16 clang-15 REQUIRED)
+find_program(BPF_CLANG NAMES clang clang-21 clang-20 clang-19 clang-18 clang-17 clang-16 clang-15 REQUIRED)
 find_program(BPFTOOL NAMES bpftool REQUIRED)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")

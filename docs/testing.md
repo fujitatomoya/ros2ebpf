@@ -10,13 +10,14 @@
 | `ros2ebpf/test/test_verbs.py` | config get/set on a file, value coercion, status table, ELF parser on libc and (if present) a real shim | same |
 
 `make test cli-test` or `make in-docker-test`; `colcon test-result --verbose` prints the results
-(the C tests go through `ament_add_test`).
+(the C tests go through `ament_add_test`). `make in-docker-ci` runs the whole CI script against a
+Rolling source build (tests, flake8, offset table vs. mainline `rmw`, BPF verifier check, deb).
 
 ## 2. Container end-to-end (`scripts/e2e.sh`, `make e2e`)
 
 Needs Docker, a kernel with BTF, bpffs. No ROS on the host.
 
-Scenario: `ros2ebpf-demo:local` (ROS 2 Jazzy: `talker`, `listener`, `add_two_ints_server`, a
+Scenario: `ros2ebpf-demo:local` (ROS 2 Rolling: `talker`, `listener`, `add_two_ints_server`, a
 client every second, domain 5) in one container; `ros2ebpfd:local` in another with `--pid host
 --privileged`, no config file. Assertions on `ros2ebpf-ctl metrics`:
 
@@ -25,13 +26,13 @@ client every second, domain 5) in one container; `ros2ebpfd:local` in another wi
 - publish-period histogram populated;
 - `/rosout` excluded by default;
 - `ros2_process_info` carries the container id, an `rmw_*` implementation and the domain;
-- `ros2ebpf_host_info{offset_table="jazzy/…"}` (shim discovered through `/proc`);
+- `ros2ebpf_host_info{offset_table="rolling/…"}` (shim discovered through `/proc`);
 - `probes_attached == probes_configured`, zero name read failures;
 - short-lived client processes are swept (bounded number of process series);
 - `disable take` turns the family off and `status -q` stays 0; `enable take` re-attaches 2/2 links;
 - counters survive `docker restart` of the daemon (pinned maps).
 
-Last verified run (Ubuntu 24.04 host, kernel 7.0, ROS 2 Jazzy demo image):
+Last verified run (Ubuntu 24.04 host, kernel 7.0, ROS 2 Rolling demo image on Ubuntu 26.04):
 
 ```
 PASS talker publishes /chatter in domain 5

@@ -36,7 +36,7 @@ Per-host settings that matter in a multi-host robot:
 host: ""                 # keep empty if hostnames are unique and stable across the robot ("main", "perception")
 robot: ""                # leave empty: the collector sets it. Set only when scraping without a collector.
 shims:
-  - path: /opt/ros/jazzy/lib/librmw_implementation.so      # this host's distro
+  - path: /opt/ros/rolling/lib/librmw_implementation.so    # this host's distro
 discover_shims: true
 expectations_file: /etc/ros2ebpf/expectations.yaml         # the file exists on ONE host only (see §2)
 ```

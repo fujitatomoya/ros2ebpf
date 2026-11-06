@@ -1,6 +1,6 @@
 # `ros2 ebpf` CLI image: ros2cli + the ros2ebpf verb package, nothing else.
 # Build from the repository root:  docker build -f docker/Dockerfile.cli -t ros2ebpf-cli .
-ARG ROS_DISTRO=jazzy
+ARG ROS_DISTRO=rolling
 FROM ros:${ROS_DISTRO}-ros-core
 ARG ROS_DISTRO
 ENV DEBIAN_FRONTEND=noninteractive

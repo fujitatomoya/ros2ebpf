@@ -9,8 +9,8 @@ robot: ""                     # optional fallback label; normally the collector 
 # librmw_implementation.so files to probe. Processes started before or after
 # the daemon are covered: uprobes are keyed by inode. [restart]
 shims:
-  - path: /opt/ros/jazzy/lib/librmw_implementation.so
-    # distro: jazzy           # default: derived from the path (/opt/ros/<distro>/...)
+  - path: /opt/ros/rolling/lib/librmw_implementation.so
+    # distro: rolling          # default: derived from the path (/opt/ros/<distro>/...)
     # arch: x86_64            # default: uname -m
 # Also scan /proc/<pid>/maps every 5 s and attach to shims found inside
 # containers (reached through /proc/<pid>/root). Needs pid-namespace visibility
@@ -48,5 +48,5 @@ control:
 
 expectations_file: /etc/ros2ebpf/expectations.yaml   # exported as ros2_topic_expected_*; optional
 pin_root: /sys/fs/bpf/ros2ebpf        # [restart] pinned maps; counters survive daemon restarts
-# offset_table: jazzy/x86_64          # force a (distro, arch) entry instead of deriving it
+# offset_table: rolling/x86_64         # force a (distro, arch) entry instead of deriving it
 log_level: info                       # error | warn | info | debug

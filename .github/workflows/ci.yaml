@@ -1,84 +1,50 @@
+# ros2ebpf follows ROS 2 rolling only (fujitatomoya/ros2ebpf#8): every job builds and tests
+# against rolling. Distro branches and their workflows are added when a release is branched.
 name: ci
 on:
   push:
     branches: [rolling]
   pull_request:
+    branches: [rolling]
+  workflow_dispatch:
 
 env:
-  ROS_DISTRO: jazzy
+  ROS_DISTRO: rolling
 
 jobs:
-  colcon:
-    name: colcon build + test (ament_cmake C/BPF packages, ament_python CLI)
-    runs-on: ubuntu-24.04
+  rolling:
+    name: rolling source build (colcon build + test, offsets vs mainline rmw, BPF verifier, deb)
+    runs-on: ubuntu-latest
+    container:
+      image: tomoyafujita/ros2dev:rolling
+      options: --privileged   # bpffs mount + BPF program load for the verifier check
+      env:
+        ROS_DISTRO: rolling
     steps:
-      - uses: actions/checkout@v4
-      - uses: ros-tooling/setup-ros@v0.7
-        with:
-          required-ros-distributions: jazzy
-      - name: Install toolchain
+      - name: Check out repository code
+        uses: actions/checkout@v7
+      - name: Build and test with ROS rolling
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake pkg-config clang-18 llvm-18 libbpf-dev \
-            libelf-dev zlib1g-dev libyaml-dev libjson-c-dev python3-yaml python3-pytest python3-flake8 \
-            python3-colcon-common-extensions ros-${ROS_DISTRO}-ament-cmake ros-${ROS_DISTRO}-ros2cli
-          sudo sh docker/install-bpftool.sh
-          sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
-      - name: colcon build
-        run: |
-          source /opt/ros/${ROS_DISTRO}/setup.bash
-          colcon build --merge-install --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Debug
-          install/bin/ros2ebpfd --version
-      - name: colcon test
-        run: |
-          source /opt/ros/${ROS_DISTRO}/setup.bash
-          colcon test --merge-install --event-handlers console_cohesion+
-          colcon test-result --verbose
-      - name: CLI lint
-        run: |
-          cd ros2ebpf
-          python3 -m flake8 --select=E,W,F --extend-ignore=W503 --max-line-length=120 ros2ebpf test
-      - name: Load BPF objects on the runner kernel (verifier check)
-        run: |
-          sudo mount -t bpf bpf /sys/fs/bpf || true
-          sudo install/bin/ros2ebpfd --check -c ros2ebpf_daemon/config/config.example.yaml || true
-          printf 'shims: []\ndiscover_shims: true\nexporter: {listen: 127.0.0.1:19477}\ncontrol: {socket: /tmp/r2e.sock}\npin_root: /sys/fs/bpf/ros2ebpf-ci\n' > /tmp/ci.yaml
-          sudo timeout 10 install/bin/ros2ebpfd -c /tmp/ci.yaml --log-level debug & sleep 4
-          sudo install/bin/ros2ebpf-ctl -s /tmp/r2e.sock status
-          curl -sf http://127.0.0.1:19477/metrics | grep -E '^ros2ebpf_(build_info|map_abi)'
-          sudo install/bin/ros2ebpf-ctl -s /tmp/r2e.sock metrics | grep -c '^ros2'
-      - name: Debian packages (cpack)
-        run: |
-          make deb
-          dpkg-deb -c build/pkg/ros2ebpf-daemon_*.deb | grep -E 'usr/bin/ros2ebpfd|usr/lib/systemd/system/ros2ebpfd.service|etc/ros2ebpf/config.example.yaml'
-          dpkg-deb -c build/pkg/ros2ebpf-exporter_*.deb | grep -E 'usr/lib/libros2ebpf_exporter.a|usr/include/ros2ebpf/maps.h'
+          ./scripts/github_workflows.sh
 
   images:
-    name: container images
+    name: container images + end-to-end (rolling binaries)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Build daemon image
-        run: docker build -f docker/Dockerfile.daemon -t ros2ebpfd:ci .
-      - name: Build CLI image
-        run: docker build -f docker/Dockerfile.cli -t ros2ebpf-cli:ci .
-      - name: Smoke test daemon in a privileged container
+      - uses: actions/checkout@v7
+      - name: Build the daemon, CLI and demo images and run scripts/e2e.sh
         run: |
           sudo mount -t bpf bpf /sys/fs/bpf || true
-          docker run -d --name d --pid host --privileged -v /sys/fs/bpf:/sys/fs/bpf -v /sys/kernel/btf:/sys/kernel/btf:ro -p 9477:9477 ros2ebpfd:ci
-          sleep 5
-          docker logs d
-          docker exec d ros2ebpf-ctl status
-          curl -sf http://127.0.0.1:9477/metrics | grep '^ros2ebpf_build_info'
-          docker rm -f d
+          make e2e
+      - name: CLI image smoke test
+        run: docker run --rm ros2ebpf-cli:local ros2 ebpf --help
 
   deploy-lint:
     name: deploy manifests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: promtool check rules
         run: |
           docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v3.5.0 check rules /p/rules/ros2.yaml

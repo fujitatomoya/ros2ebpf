@@ -1,9 +1,10 @@
 # Convenience targets around colcon. Everything also works with plain colcon / docker; see docs/development.md.
 BUILD ?= build
 JOBS  ?= $(shell nproc)
-ROS_DISTRO ?= jazzy
+ROS_DISTRO ?= rolling
 ROS_SETUP  ?= /opt/ros/$(ROS_DISTRO)/setup.sh
 IMAGE_BUILD ?= ros2ebpf-build:local
+IMAGE_CI ?= tomoyafujita/ros2dev:$(ROS_DISTRO)   # ROS 2 source-build environment used by CI
 # run as the host user so build/ install/ log/ stay owned by you
 DOCKER_RUN = docker run --rm -u $(shell id -u):$(shell id -g) -e HOME=/tmp -v "$(CURDIR)":/src -w /src $(IMAGE_BUILD)
 
@@ -15,7 +16,7 @@ BUILD_ARGS = --merge-install --build-base $(BUILD) --event-handlers console_cohe
 BUILD_TYPE ?= RelWithDebInfo
 
 .PHONY: all cli test cli-test clean deb in-docker-deb \
-        build-image in-docker-test images image-daemon image-cli image-demo e2e e2e-clean k8s-sync k8s-rules lint
+        build-image in-docker-test in-docker-ci images image-daemon image-cli image-demo e2e e2e-clean k8s-sync k8s-rules lint
 
 all:                             ## exporter + daemon + interfaces -> install/ (merged prefix)
 	$(COLCON) build $(BUILD_ARGS) --packages-up-to $(C_PKGS) --cmake-args -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
@@ -43,9 +44,9 @@ deb: $(BUILD)/COLCON_IGNORE      ## Debian packages into build/pkg (run natively
 	. $(ROS_SETUP) && cmake -S ros2ebpf_exporter -B $(BUILD)/pkg-exporter -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
 	cmake --build $(BUILD)/pkg-exporter -j$(JOBS)
 	cd $(BUILD)/pkg-exporter && cpack -G DEB
-	cmake --install $(BUILD)/pkg-exporter --prefix $(CURDIR)/$(BUILD)/pkg-stage
+	cmake --install $(BUILD)/pkg-exporter --prefix $(abspath $(BUILD))/pkg-stage
 	. $(ROS_SETUP) && cmake -S ros2ebpf_daemon -B $(BUILD)/pkg-daemon -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF \
-	    -DCMAKE_PREFIX_PATH=$(CURDIR)/$(BUILD)/pkg-stage
+	    -DCMAKE_PREFIX_PATH=$(abspath $(BUILD))/pkg-stage
 	cmake --build $(BUILD)/pkg-daemon -j$(JOBS)
 	cd $(BUILD)/pkg-daemon && cpack -G DEB
 	mkdir -p $(BUILD)/pkg && cp $(BUILD)/pkg-exporter/*.deb $(BUILD)/pkg-daemon/*.deb $(BUILD)/pkg/
@@ -60,6 +61,9 @@ build-image:                     ## toolchain image used by `make in-docker-*` (
 
 in-docker-test: build-image      ## colcon build + tests without installing ROS/clang/libbpf on the host
 	$(DOCKER_RUN) make test cli-test
+
+in-docker-ci:                    ## exactly what CI runs: scripts/github_workflows.sh in the rolling source-build image (privileged: BPF load)
+	docker run --rm --privileged -v "$(CURDIR)":/src:ro -w /src -e ROS_DISTRO=$(ROS_DISTRO) $(IMAGE_CI) bash ./scripts/github_workflows.sh
 
 image-daemon:
 	docker build --build-arg ROS_DISTRO=$(ROS_DISTRO) -f docker/Dockerfile.daemon -t ros2ebpfd:local .

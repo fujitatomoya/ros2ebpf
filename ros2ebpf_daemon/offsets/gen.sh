@@ -3,7 +3,7 @@
 # machine, so a new (distro, arch) row can be added to src/offsets.c (or
 # `offset_table:` overridden) for from-source builds or new distros.
 #
-#   usage: gen.sh [/opt/ros/<distro>]
+#   usage: gen.sh [/opt/ros/<distro> | <colcon workspace>/install]
 #
 # Requires a C compiler and the rmw headers of that installation.
 set -e
@@ -14,7 +14,8 @@ if [ -z "$ROS_ROOT" ] || [ ! -d "$ROS_ROOT/include" ]; then
 fi
 DISTRO=$(basename "$ROS_ROOT")
 ARCH=$(uname -m)
-INC="-I$ROS_ROOT/include -I$ROS_ROOT/include/rmw -I$ROS_ROOT/include/rcutils -I$ROS_ROOT/include/rosidl_runtime_c -I$ROS_ROOT/include/rosidl_typesupport_interface"
+# works for /opt/ros/<distro> and for a colcon (merged) install/ of a source build
+INC="-I$ROS_ROOT/include -I$ROS_ROOT/include/rmw -I$ROS_ROOT/include/rcutils -I$ROS_ROOT/include/rosidl_runtime_c -I$ROS_ROOT/include/rosidl_typesupport_interface -I$ROS_ROOT/include/rosidl_dynamic_typesupport"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 cat > "$TMP/off.c" <<'C'
