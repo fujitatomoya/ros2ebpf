@@ -118,7 +118,7 @@ docker run -it --name ros2ebpf-dev --privileged --pid host --network host \
 |---|---|
 | `--privileged` | load the BPF programs and attach the uprobes (`CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_PTRACE`); without it the daemon fails at `attach … Operation not permitted` |
 | `--pid host` | the BPF programs report host pids and the daemon resolves them through `/proc`; without it every process is `unknown`. It is also how the daemon finds ROS processes in other containers |
-| `--network host` | `:9477/metrics` is reachable from the host and from the Prometheus container; nodes in the container talk DDS with nodes outside it |
+| `--network host` | every container of this tutorial is on the host network: the daemon's `:9477` is `localhost` for Prometheus, Prometheus is `localhost` for Grafana, and DDS works between nodes in different containers |
 | `-v /sys/fs/bpf:/sys/fs/bpf` | the pinned maps live on the host's bpffs, so counters survive the container |
 | `-v ~/ros2_ws:/ws` | the workspace stays on the host: the build survives the container, the editor on the host sees the code |
 | `-v /etc/machine-id` | the `machine_id` label; optional |
@@ -226,26 +226,25 @@ Nothing else is needed, no Prometheus and no browser.
 
 ### 4.6 Prometheus and Grafana
 
-Two more containers on the host, started from the repository checkout (`~/ros2_ws/src/ros2ebpf`), with the configuration, rules and dashboards from `deploy/`:
+Two more containers on the host network, started from the repository checkout (`~/ros2_ws/src/ros2ebpf`), with the configuration, rules and dashboards from `deploy/`:
 
 ```bash
-docker network create ros2ebpf
-docker run -d --name prometheus --network ros2ebpf --add-host host.docker.internal:host-gateway -p 9090:9090 \
-  -v "$PWD/deploy/prometheus:/etc/prometheus:ro" prom/prometheus:v3.5.0 --config.file=/etc/prometheus/prometheus-local.yml
-docker run -d --name grafana --network ros2ebpf -p 3000:3000 -e GF_SECURITY_ADMIN_PASSWORD=admin \
+docker run -d --name prometheus --network host -v "$PWD/deploy/prometheus:/etc/prometheus:ro" \
+  prom/prometheus:v3.5.0 --config.file=/etc/prometheus/prometheus-local.yml
+docker run -d --name grafana --network host -e GF_SECURITY_ADMIN_PASSWORD=admin -e PROMETHEUS_URL=http://localhost:9090 \
   -v "$PWD/deploy/grafana/provisioning:/etc/grafana/provisioning:ro" \
   -v "$PWD/deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro" grafana/grafana:12.1.0
 ```
 
-[deploy/prometheus/prometheus-local.yml](deploy/prometheus/prometheus-local.yml) scrapes the daemon every 5 s at `host.docker.internal:9477` (the host, as seen from a container on the bridge network `ros2ebpf`; the daemon listens on the host network) with the label `robot="bench-01"`, and loads the alert rules of `deploy/prometheus/rules/ros2.yaml`.
-Grafana finds Prometheus by its container name on that network, which is what the provisioned datasource expects.
+[deploy/prometheus/prometheus-local.yml](deploy/prometheus/prometheus-local.yml) scrapes the daemon every 5 s at `localhost:9477` with the label `robot="bench-01"` and loads the alert rules of `deploy/prometheus/rules/ros2.yaml`.
+The provisioned Grafana datasource takes Prometheus from `PROMETHEUS_URL`: `localhost:9090` here, the `prometheus` service in the central manifests.
 
 - <http://localhost:9090/targets>: `ros2ebpf` is `UP`; <http://localhost:9090/alerts> lists the rules; query `rate(ros2_rmw_publish_total[1m])` while the talker runs.
 - <http://localhost:3000> (admin / admin), Dashboards, folder **ROS 2**: "ROS 2 fleet" (robot `bench-01`), "ROS 2 robot", "ROS 2 host" (publish and take rates per topic, process table) and "ros2ebpf daemon health".
   The dashboards take 30 s to fill after the talker starts.
 
 Alertmanager and the per-robot collector are part of the real layout (§8 and [docs/deployment.md](docs/deployment.md)); here Prometheus evaluates the rules by itself.
-`docker rm -f prometheus grafana && docker network rm ros2ebpf` removes both.
+`docker rm -f prometheus grafana` removes both.
 
 ### 4.7 Day-2 operations
 
@@ -273,9 +272,9 @@ docker build -f docker/Dockerfile.demo -t ros2ebpf-demo:local .
 docker run -d --name demo --network host -e ROS_DOMAIN_ID=5 ros2ebpf-demo:local
 
 # the daemon, with no config file at all: discovery finds the demo container's shim
-docker run -d --name ros2ebpfd --pid host --privileged \
+docker run -d --name ros2ebpfd --pid host --network host --privileged \
   -v /sys/fs/bpf:/sys/fs/bpf -v /sys/kernel/btf:/sys/kernel/btf:ro -v /etc/machine-id:/etc/machine-id:ro \
-  -v ros2ebpf-run:/run/ros2ebpf -p 9477:9477 -e ROS2EBPF_HOST=$(hostname) ros2ebpfd:local
+  -v ros2ebpf-run:/run/ros2ebpf -e ROS2EBPF_HOST=$(hostname) ros2ebpfd:local
 
 docker logs ros2ebpfd
 #  I shim /proc/431/root/opt/ros/rolling/lib/librmw_implementation.so: distro=rolling arch=x86_64 … (discovered)
@@ -285,12 +284,13 @@ docker logs ros2ebpfd
 # (b) a node in the development container of §4 (also --pid host): found the same way within 5 s
 ROS_DOMAIN_ID=7 ros2 run demo_nodes_cpp talker &
 
-docker run --rm -v ros2ebpf-run:/run/ros2ebpf ros2ebpf-cli:local ros2 ebpf status -v
-docker run --rm -v ros2ebpf-run:/run/ros2ebpf ros2ebpf-cli:local ros2 ebpf top --once
-docker exec ros2ebpfd ros2ebpf-ctl metrics | grep -E 'ros2_(rmw_publish_total|process_info)'
+docker run --rm --network host -v ros2ebpf-run:/run/ros2ebpf ros2ebpf-cli:local ros2 ebpf status -v
+docker run --rm --network host -v ros2ebpf-run:/run/ros2ebpf ros2ebpf-cli:local ros2 ebpf top --once
+curl -s localhost:9477/metrics | grep -E 'ros2_(rmw_publish_total|process_info)'
 ```
 
 The `container` label of `ros2_process_info` carries the container id, `domain_id` the per-process `ROS_DOMAIN_ID`, and the shim entry in `status` shows `discovered`.
+Every container is on the host network, so `:9477` is the same `localhost:9477` as in §4 and the Prometheus and Grafana containers of 4.6 work unchanged.
 Two containers from the same image share one inode and therefore one set of probes; no double counting.
 
 CI runs this scenario on every commit (`images` job); the full end-to-end assertions (counters present and growing, `/rosout` excluded, identity labels, exit sweeps, enable/disable, counters surviving a daemon restart) run in the `rolling` job against a mainline source build, see [docs/testing.md](docs/testing.md).
@@ -400,7 +400,6 @@ Then:
 | `ros2 ebpf status`: `cannot connect … Permission denied` | add your user to group `ros2ebpf`, or use `sudo` |
 | `pinned maps have ABI N … recreating` | upgrade changed the map layout; counters reset once |
 | counters for a one-shot client never appear | endpoint counters are deleted with the endpoint; look at the server side (`side="server"`) |
-| exporter check fails in `doctor` inside the CLI container | expected: `:9477` belongs to the daemon's network namespace; check from the host |
 | many `pid … exited: removed 0 endpoints` | normal: `rmw_destroy_*` already removed them at clean shutdown |
 
 Debug logging: `ros2 ebpf config set log_level debug` (or `--log-level debug` in the foreground).

@@ -62,7 +62,7 @@ Same on every host, with Docker/Podman (see README §5 for the flags and why):
 ```bash
 docker run -d --name ros2ebpfd --restart unless-stopped --pid host --privileged \
   -v /sys/fs/bpf:/sys/fs/bpf -v /sys/kernel/btf:/sys/kernel/btf:ro -v /etc/machine-id:/etc/machine-id:ro \
-  -v /etc/ros2ebpf:/etc/ros2ebpf:ro -p 9477:9477 -e ROS2EBPF_HOST=$(hostname) ghcr.io/fujitatomoya/ros2ebpfd:0.1.0
+  -v /etc/ros2ebpf:/etc/ros2ebpf:ro --network host -e ROS2EBPF_HOST=$(hostname) ghcr.io/fujitatomoya/ros2ebpfd:0.1.0
 docker exec ros2ebpfd ros2ebpf-ctl status -q && echo healthy
 ```
 
