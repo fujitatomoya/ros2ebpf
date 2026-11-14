@@ -6,7 +6,8 @@
  * (rmw_publisher_t, rmw_subscription_t, rmw_client_t, rmw_service_t). The
  * handle starts with `const char *implementation_identifier`, followed by
  * `void *data`, followed by the name pointer; the name offset comes from the
- * `config` map so a per-(distro, arch) table in the daemon decides it.
+ * `config` map so the per-architecture table in the daemon (src/offsets.c,
+ * checked against mainline rmw in CI) decides it.
  *
  * Hot path: one hash lookup + atomic add. Cold path (first sight of a
  * handle): read the identifier and the name from user memory, decide the

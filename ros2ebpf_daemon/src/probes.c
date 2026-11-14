@@ -218,23 +218,29 @@ static struct shim *find_shim(struct probes *p, dev_t dev, ino_t ino)
     return NULL;
 }
 
-static int resolve_shim_offsets(struct shim *s, const struct config *cfg, const char *host_arch)
+static int find_rejected(const struct probes *p, dev_t dev, ino_t ino)
 {
-    if (!s->distro[0] && cfg && cfg->offset_table[0]) {
-        /* explicit "distro/arch" override */
-        sscanf(cfg->offset_table, "%31[^/]/%15s", s->distro, s->arch);
-    }
-    if (!s->distro[0])
-        offsets_distro_from_path(s->path, s->distro, sizeof(s->distro));
+    for (int i = 0; i < p->n_rejected; i++)
+        if (p->rejected[i].dev == dev && p->rejected[i].ino == ino)
+            return 1;
+    return 0;
+}
+
+/* ros2ebpf follows ROS 2 Rolling only (#15). A shim under /opt/ros/<distro>/ names its
+ * distro and anything else (the colcon install/ of a source build) is Rolling; a shim of
+ * another distro is refused. `seen_path` is the path as the process sees it: for a
+ * discovered shim the in-container path, not /proc/<pid>/root/<path>. */
+static int resolve_shim_offsets(struct shim *s, const char *seen_path, const char *host_arch)
+{
+    if (offsets_distro_from_path(seen_path, s->distro, sizeof(s->distro)) != 0)
+        snprintf(s->distro, sizeof(s->distro), "rolling");
     if (!s->arch[0])
         snprintf(s->arch, sizeof(s->arch), "%s", host_arch);
     s->off = offsets_lookup(s->distro, s->arch);
     if (!s->off) {
-        log_warn("shim %s: no offset table for distro '%s' arch '%s', using generic LP64 entry",
-                 s->path, s->distro[0] ? s->distro : "?", s->arch);
-        s->off = offsets_lookup("lp64", "");
-        if (!s->distro[0])
-            snprintf(s->distro, sizeof(s->distro), "unknown");
+        log_error("shim %s: ROS 2 %s on %s is not supported (ros2ebpf follows Rolling only, "
+                  "on x86_64 and aarch64); skipping it", s->path, s->distro, s->arch);
+        return -1;
     }
     return 0;
 }
@@ -282,7 +288,6 @@ int probes_add_config_shims(struct probes *p, const struct config *cfg, const ch
     for (int i = 0; i < cfg->n_shims; i++) {
         struct shim s = { .from_config = 1 };
         snprintf(s.path, sizeof(s.path), "%s", cfg->shims[i].path);
-        snprintf(s.distro, sizeof(s.distro), "%s", cfg->shims[i].distro);
         snprintf(s.arch, sizeof(s.arch), "%s", cfg->shims[i].arch);
         struct stat st;
         if (stat(s.path, &st)) {
@@ -298,7 +303,8 @@ int probes_add_config_shims(struct probes *p, const struct config *cfg, const ch
         s.ino = st.st_ino;
         if (find_shim(p, s.dev, s.ino))
             continue;
-        resolve_shim_offsets(&s, cfg, host_arch);
+        if (resolve_shim_offsets(&s, s.path, host_arch))
+            continue;
         if (register_shim(p, &s) == 0)
             added++;
     }
@@ -337,7 +343,7 @@ int probes_discover_shims(struct probes *p, const char *host_arch)
             if (sscanf(line, "%lx-%lx %7s %lx %lx:%lx %lu", &start, &end, perms, &off, &maj, &min, &ino) != 7)
                 continue;
             dev_t dev = makedev((unsigned)maj, (unsigned)min);
-            if (find_shim(p, dev, (ino_t)ino))
+            if (find_shim(p, dev, (ino_t)ino) || find_rejected(p, dev, (ino_t)ino))
                 break;
             struct shim s = { .from_config = 0, .dev = dev, .ino = (ino_t)ino };
             snprintf(s.path, sizeof(s.path), "/proc/%.32s/root%.440s", de->d_name, file);
@@ -346,9 +352,14 @@ int probes_discover_shims(struct probes *p, const char *host_arch)
                 log_debug("discovered %s but it lacks symbols (%s); ignoring", s.path, missing);
                 break;
             }
-            /* distro from the in-container path, not from /proc/<pid>/root */
-            offsets_distro_from_path(file, s.distro, sizeof(s.distro));
-            resolve_shim_offsets(&s, NULL, host_arch);
+            if (resolve_shim_offsets(&s, file, host_arch)) {
+                if (p->n_rejected < MAX_SHIMS) {
+                    p->rejected[p->n_rejected].dev = dev;
+                    p->rejected[p->n_rejected].ino = (ino_t)ino;
+                    p->n_rejected++;
+                }
+                break;
+            }
             if (register_shim(p, &s) == 0)
                 added++;
             break;
@@ -525,7 +536,7 @@ int probes_write_config(struct probes *p, const struct config *cfg)
     c.nbuckets = (__u32)cfg->n_buckets;
     for (int i = 0; i < cfg->n_buckets; i++)
         c.bounds_ns[i] = (__u64)(cfg->buckets[i] * 1e9 + 0.5);
-    const struct offset_entry *off = p->active_off ? p->active_off : offsets_lookup("lp64", "");
+    const struct offset_entry *off = p->active_off ? p->active_off : offsets_host_default();
     offsets_apply(off, &c);
     c.default_flags = cfg->seq_gap_all ? ROS2EBPF_F_SEQ_GAP : 0;
     __u32 zero = 0;

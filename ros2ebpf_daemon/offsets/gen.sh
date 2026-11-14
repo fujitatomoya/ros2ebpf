@@ -1,20 +1,21 @@
 #!/bin/sh
-# Prints the struct offsets ros2ebpfd needs for the ROS 2 installation on this
-# machine, so a new (distro, arch) row can be added to src/offsets.c (or
-# `offset_table:` overridden) for from-source builds or new distros.
+# Prints the struct offsets ros2ebpfd needs for the ROS 2 Rolling installation
+# on this machine, as the row of src/offsets.c for this architecture. CI runs
+# it against the mainline source build on every commit and fails when the row
+# in src/offsets.c differs (scripts/github_workflows.sh, check_rmw_offsets).
 #
-#   usage: gen.sh [/opt/ros/<distro> | <colcon workspace>/install]
+#   usage: gen.sh [/opt/ros/rolling | <colcon workspace>/install]
 #
-# Requires a C compiler and the rmw headers of that installation.
+# Requires a C compiler and the rmw headers of that installation, in the
+# merged layout (/opt/ros/rolling, or a workspace built with --merge-install).
 set -e
-ROS_ROOT=${1:-${ROS_DISTRO:+/opt/ros/$ROS_DISTRO}}
-if [ -z "$ROS_ROOT" ] || [ ! -d "$ROS_ROOT/include" ]; then
-  echo "usage: $0 /opt/ros/<distro>   (or set ROS_DISTRO)" >&2
+ROS_ROOT=${1:-/opt/ros/rolling}
+if [ ! -d "$ROS_ROOT/include" ]; then
+  echo "usage: $0 [/opt/ros/rolling | <colcon workspace>/install]" >&2
   exit 2
 fi
-DISTRO=$(basename "$ROS_ROOT")
+DISTRO=rolling
 ARCH=$(uname -m)
-# works for /opt/ros/<distro> and for a colcon (merged) install/ of a source build
 INC="-I$ROS_ROOT/include -I$ROS_ROOT/include/rmw -I$ROS_ROOT/include/rcutils -I$ROS_ROOT/include/rosidl_runtime_c -I$ROS_ROOT/include/rosidl_typesupport_interface -I$ROS_ROOT/include/rosidl_dynamic_typesupport"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Per-(distro, arch) struct offsets. The public rmw handles have had the
- * layout { implementation_identifier, data, <name> } since Foxy and
- * rmw_message_info_t has carried publication_sequence_number at offset 16
- * since Galactic, so every entry is identical today; the table exists so a
- * future ABI change on one distro does not silently misread the others.
- * ros2ebpf_daemon/offsets/gen.sh regenerates the values with pahole/gcc.
+ * Struct offsets of the rmw handles. ros2ebpf follows ROS 2 Rolling only
+ * (fujitatomoya/ros2ebpf#15): the table has one row per supported
+ * architecture, and CI regenerates the values from the rmw headers of mainline
+ * on every commit (check_rmw_offsets in scripts/github_workflows.sh) so a
+ * layout change on mainline fails the build until the row is updated. The
+ * public rmw handles start with { implementation_identifier, data, <name> }
+ * and rmw_message_info_t carries publication_sequence_number at offset 16 on
+ * both LP64 targets, hence the identical values. The row in use is exported
+ * per host as ros2ebpf_host_info{offset_table="rolling/<arch>"}.
+ * ros2ebpf_daemon/offsets/gen.sh prints the row for a given Rolling install.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -13,32 +17,31 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <elf.h>
 #include "offsets.h"
 
 static const struct offset_entry table[] = {
-    { "humble",  "x86_64",  16, 16 },
-    { "humble",  "aarch64", 16, 16 },
-    { "iron",    "x86_64",  16, 16 },
-    { "iron",    "aarch64", 16, 16 },
-    { "jazzy",   "x86_64",  16, 16 },
-    { "jazzy",   "aarch64", 16, 16 },
-    { "kilted",  "x86_64",  16, 16 },
-    { "kilted",  "aarch64", 16, 16 },
     { "rolling", "x86_64",  16, 16 },
     { "rolling", "aarch64", 16, 16 },
-    { "lp64",    "",        16, 16 },   /* generic fallback for any LP64 target */
 };
 
 const struct offset_entry *offsets_lookup(const char *distro, const char *arch)
 {
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
         const struct offset_entry *e = &table[i];
-        if ((!distro[0] || !strcmp(e->distro, distro)) && (!arch[0] || !e->arch[0] || !strcmp(e->arch, arch)))
+        if (!strcmp(e->distro, distro) && !strcmp(e->arch, arch))
             return e;
     }
     return NULL;
+}
+
+const struct offset_entry *offsets_host_default(void)
+{
+    struct utsname u;
+    const struct offset_entry *e = uname(&u) == 0 ? offsets_lookup("rolling", u.machine) : NULL;
+    return e ? e : &table[0];
 }
 
 int offsets_distro_from_path(const char *path, char *out, size_t n)

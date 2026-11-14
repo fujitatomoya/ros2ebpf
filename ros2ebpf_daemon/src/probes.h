@@ -46,12 +46,14 @@ struct probes {
     struct fam_links cleanup;                /* rmw_destroy_* uprobes, per shim */
     struct bpf_link *exit_link;              /* tp_btf sched_process_exit */
     int wiped;                               /* pinned maps were recreated at startup */
+    struct { dev_t dev; ino_t ino; } rejected[MAX_SHIMS];   /* discovered shims of another ROS 2 distro: logged once */
+    int n_rejected;
 };
 
 int  probes_open_load(struct probes *p, const struct config *cfg, ring_buffer_sample_fn cb, void *ctx);
 void probes_close(struct probes *p);
 
-/* Static shims from config: resolve distro/arch/offsets and register. */
+/* Static shims from config: resolve arch/offsets and register. */
 int  probes_add_config_shims(struct probes *p, const struct config *cfg, const char *host_arch);
 /* Scan /proc/<pid>/maps for shims not yet known (containers); attach enabled
  * families to new ones. Returns number of newly attached shims. */

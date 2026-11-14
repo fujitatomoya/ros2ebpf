@@ -1,0 +1,23 @@
+# Prometheus for one host (README tutorial A, section 4.6): scrapes ros2ebpfd directly,
+# no collector, no remote_write, no Alertmanager (the rules still evaluate and show on /alerts).
+# Run it on the host, next to the development container, from the repository root:
+#
+#   docker run -d --name prometheus --network ros2ebpf --add-host host.docker.internal:host-gateway \
+#     -p 9090:9090 -v "$PWD/deploy/prometheus:/etc/prometheus:ro" prom/prometheus:v3.5.0 \
+#     --config.file=/etc/prometheus/prometheus-local.yml
+#
+# The daemon serves :9477 on the host network; host.docker.internal is the host as seen from a
+# container on a bridge network. The central setup (prometheus.yml) receives remote_write instead.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yaml
+
+scrape_configs:
+  - job_name: ros2ebpf
+    honor_labels: true                    # keep the exporter's own host label
+    static_configs:
+      - targets: [host.docker.internal:9477]
+        labels: {robot: bench-01}         # on a real robot the collector adds this label

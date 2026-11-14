@@ -44,7 +44,6 @@ KNOWN_KEYS = {
     'control.http': (str, '(restart)'),
     'expectations_file': (str, ''),
     'pin_root': (str, '(restart)'),
-    'offset_table': (str, 'force distro/arch row'),
     'log_level': (str, 'error|warn|info|debug'),
 }
 

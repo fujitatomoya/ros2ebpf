@@ -10,9 +10,8 @@
 #define CFG_DEFAULT_PATH "/etc/ros2ebpf/config.yaml"
 
 struct cfg_shim {
-    char distro[32];          /* "" = derive from path (/opt/ros/<distro>/...) */
     char arch[16];            /* "" = uname -m */
-    char path[512];
+    char path[512];           /* /opt/ros/rolling/lib/librmw_implementation.so, or the one of a source build */
 };
 
 struct config {
@@ -39,7 +38,6 @@ struct config {
     char control_http[64];
     char expectations_file[512];
     char pin_root[256];
-    char offset_table[64];    /* "" = auto from shim distro/arch; else "distro/arch" override */
     int log_level;
 };
 

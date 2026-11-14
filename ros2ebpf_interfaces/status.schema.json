@@ -16,7 +16,7 @@
     "kernel": {"type": "string"},
     "config_path": {"type": "string"},
     "pin_root": {"type": "string"},
-    "offset_table": {"type": "string", "description": "distro/arch row of the struct offset table in use"},
+    "offset_table": {"type": "string", "description": "row of the struct offset table in use: rolling/<arch>"},
     "maps_recreated_at_start": {"type": "boolean"},
     "shims": {
       "type": "array",
