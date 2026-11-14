@@ -75,9 +75,9 @@ def test_config_set_file(tmp_path, capsys):
 def test_status_table(capsys):
     results = {'local': {
         'healthy': True, 'host': 'main', 'robot': '', 'probes_attached': 15, 'probes_expected': 15,
-        'shims': [{'path': '/opt/ros/jazzy/lib/librmw_implementation.so'}],
+        'shims': [{'path': '/opt/ros/rolling/lib/librmw_implementation.so'}],
         'exporter': {'mode': 'inprocess', 'serving': True}, 'maps': {'processes': 2},
-        'identity': {'domains_seen': [0, 7]}, 'offset_table': 'jazzy/x86_64', 'uptime_seconds': 3725,
+        'identity': {'domains_seen': [0, 7]}, 'offset_table': 'rolling/x86_64', 'uptime_seconds': 3725,
         'probes': {'publish': {'enabled': True, 'attached': 2, 'expected': 2}},
     }}
     StatusVerb.print_table(results, {'remote': 'boom'}, verbose=False)

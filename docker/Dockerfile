@@ -1,19 +1,19 @@
-# ros2ebpfd runtime image: daemon + exporter + ros2ebpf-ctl, no ROS inside.
-# Build from the repository root:  docker build -f docker/Dockerfile.daemon -t ros2ebpfd .
+# ros2ebpfd image for the Kubernetes DaemonSet (deploy/k8s/robot): daemon + exporter + ros2ebpf-ctl, no ROS inside.
+# Build from the repository root:  docker build -f docker/Dockerfile -t ros2ebpfd .
 # The build stage needs ament_cmake + colcon (ros:rolling-ros-base, Ubuntu 26.04); the runtime stage is plain Ubuntu 26.04.
-ARG ROS_DISTRO=rolling
-FROM ros:${ROS_DISTRO}-ros-base AS build
-ARG ROS_DISTRO
+# ros2ebpf follows ROS 2 Rolling only (#15): no other distro is a valid base. Everything else
+# (building, the tutorial, CI) happens in the development container of README section 4.
+FROM ros:rolling-ros-base AS build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake pkg-config clang llvm libbpf-dev bpftool \
-      libelf-dev zlib1g-dev libyaml-dev libjson-c-dev ros-${ROS_DISTRO}-ament-cmake \
+      libelf-dev zlib1g-dev libyaml-dev libjson-c-dev ros-rolling-ament-cmake \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY ros2ebpf_exporter ros2ebpf_exporter
 COPY ros2ebpf_daemon ros2ebpf_daemon
 ARG BPF_TARGET_ARCH=
-RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+RUN . /opt/ros/rolling/setup.sh \
     && colcon build --merge-install --install-base /opt/ros2ebpf --packages-up-to ros2ebpf_daemon \
          --event-handlers console_cohesion+ \
          --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF ${BPF_TARGET_ARCH:+-DBPF_TARGET_ARCH=$BPF_TARGET_ARCH}
@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=build /opt/ros2ebpf/bin/ /usr/local/bin/
 COPY --from=build /opt/ros2ebpf/etc/ /usr/local/etc/
 COPY --from=build /opt/ros2ebpf/share/ros2ebpf_daemon/ /usr/local/share/ros2ebpf_daemon/
-COPY docker/entrypoint-daemon.sh /usr/local/bin/entrypoint.sh
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN mkdir -p /etc/ros2ebpf /run/ros2ebpf \
     && cp /usr/local/etc/ros2ebpf/config.example.yaml /etc/ros2ebpf/config.example.yaml \
     && cp /usr/local/etc/ros2ebpf/expectations.example.yaml /etc/ros2ebpf/expectations.example.yaml

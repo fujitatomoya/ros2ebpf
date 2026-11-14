@@ -4,6 +4,8 @@ datasources:
     uid: prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    # PROMETHEUS_URL: http://prometheus:9090 in the central manifests (service name),
+    # http://localhost:9090 for the containers on the host network of README section 4.6
+    url: ${PROMETHEUS_URL}
     isDefault: true
     editable: false

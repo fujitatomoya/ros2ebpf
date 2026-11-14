@@ -17,6 +17,7 @@ spec:
             - name: GF_SECURITY_ADMIN_PASSWORD
               valueFrom: {secretKeyRef: {name: grafana-admin, key: password}}
             - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+            - {name: PROMETHEUS_URL, value: http://prometheus:9090}   # the provisioned datasource
           ports: [{name: http, containerPort: 3000}]
           volumeMounts:
             - {name: datasources, mountPath: /etc/grafana/provisioning/datasources}

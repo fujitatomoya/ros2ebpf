@@ -1,6 +1,7 @@
 # Central Prometheus for ros2ebpf. Robots push through remote_write
 # (--web.enable-remote-write-receiver); nothing is scraped directly except
-# Prometheus itself. Alert rules live in rules/.
+# Prometheus itself. Alert rules live in rules/. For one host scraped
+# directly (README section 4.6) see prometheus-local.yml.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -17,8 +18,3 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: [localhost:9090]
-  # Direct scrape example (no collector): uncomment for a single-box setup.
-  # - job_name: ros2ebpf
-  #   static_configs:
-  #     - targets: [ros2ebpfd:9477]
-  #       labels: {robot: bench-01}

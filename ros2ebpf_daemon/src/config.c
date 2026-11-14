@@ -73,8 +73,7 @@ static int apply(struct config *c, const char *path, const char *val, int in_seq
         if (idx >= c->n_shims)
             c->n_shims = idx + 1;
         struct cfg_shim *s = &c->shims[idx];
-        if (!strcmp(field, "distro")) set_str(s->distro, sizeof(s->distro), val);
-        else if (!strcmp(field, "arch")) set_str(s->arch, sizeof(s->arch), val);
+        if (!strcmp(field, "arch")) set_str(s->arch, sizeof(s->arch), val);
         else if (!strcmp(field, "path")) set_str(s->path, sizeof(s->path), val);
         else log_warn("config: unknown key %s", path);
     }
@@ -112,7 +111,6 @@ static int apply(struct config *c, const char *path, const char *val, int in_seq
     else if (!strcmp(path, "control.http")) set_str(c->control_http, sizeof(c->control_http), val);
     else if (!strcmp(path, "expectations_file")) set_str(c->expectations_file, sizeof(c->expectations_file), val);
     else if (!strcmp(path, "pin_root")) set_str(c->pin_root, sizeof(c->pin_root), val);
-    else if (!strcmp(path, "offset_table")) set_str(c->offset_table, sizeof(c->offset_table), val);
     else if (!strcmp(path, "log_level")) {
         if (!strcasecmp(val, "error")) c->log_level = LOG_ERROR;
         else if (!strcasecmp(val, "warn")) c->log_level = LOG_WARN;

@@ -145,9 +145,12 @@ class DoctorVerb(VerbExtension):
         else:
             rep('WARN', f'config {args.config}', 'not found (daemon uses defaults + shim discovery)')
         if not shims:
-            for d in sorted(os.listdir('/opt/ros')) if os.path.isdir('/opt/ros') else []:
-                p = f'/opt/ros/{d}/lib/librmw_implementation.so'
-                if os.path.exists(p):
+            # Rolling only: the binaries under /opt/ros/rolling, or the source build whose
+            # install/ is sourced in this shell (every prefix of AMENT_PREFIX_PATH)
+            prefixes = ['/opt/ros/rolling'] + os.environ.get('AMENT_PREFIX_PATH', '').split(os.pathsep)
+            for prefix in prefixes:
+                p = os.path.join(prefix, 'lib', 'librmw_implementation.so')
+                if prefix and os.path.exists(p) and p not in shims:
                     shims.append(p)
             if shims:
                 rep('INFO', 'shims', f'none configured; found {", ".join(shims)}')

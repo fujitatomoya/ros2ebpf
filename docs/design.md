@@ -5,7 +5,8 @@ Design note, rev. 4 — 2026-11-04.
 - rev. 1 (2026-10-07): initial design.
 - rev. 2 (2026-11-04): multi-host / multi-robot identity (`host`, `machine_id`, `robot`, `domain_id`).
 - rev. 3 (2026-11-04): restructured around the project's components — `ros2 ebpf` CLI, `ros2ebpfd` daemon, statistics exporter (placement decided in §5), Prometheus / Alertmanager — with repository layout, interfaces between components, and the deployment procedures (hosts and Kubernetes).
-- rev. 4 (2026-11-04): implementation notes (§13) recording where the first implementation deviates from or refines rev. 3, after the end-to-end run against ROS 2 Jazzy nodes in a container.
+- rev. 4 (2026-11-04): implementation notes (§13) recording where the first implementation deviates from or refines rev. 3, after the end-to-end run against ROS 2 nodes in a container.
+- rev. 5 (2026-11-14): ROS 2 Rolling only (#15): one offset table row per architecture, checked against mainline in CI; a shim of another distro is refused; everything builds and runs in containers on Ubuntu 26.04.
 
 ## 1. Motivation
 
@@ -38,7 +39,7 @@ Design note, rev. 4 — 2026-11-04.
 | R7 | Expected rates expressed as data, one generic alert rule | `ros2_topic_expected_hz` keyed by robot + topic |
 | R8 | Agent health is itself observable | probes attached, map occupancy, read failures |
 | R9 | Every series carries host, robot and domain identity | `host` + `machine_id` from the OS, `robot` from operator config, `domain_id` per process |
-| R10 | Hosts of one robot may differ in distro, RMW vendor and CPU architecture | per-(distro, arch) offset table; identity exported, not assumed |
+| R10 | Hosts of one robot may differ in RMW vendor and CPU architecture | per-architecture offset table; identity exported, not assumed |
 | R11 | Operable through `ros2cli` like any other ROS 2 tool | `ros2 ebpf <verb>` |
 | R12 | Reference deployment that a user can bring up end to end | Kubernetes manifests for the robot (DaemonSet) and the central side, Alloy config for a plain host |
 
@@ -83,7 +84,7 @@ flowchart LR
             mapsA --> expA
             identA --> expA
         end
-        subgraph hostB["Host B: perception (aarch64, Jazzy, rmw_cyclonedds)"]
+        subgraph hostB["Host B: perception (aarch64, Rolling, rmw_cyclonedds)"]
             direction TB
             procB["ROS 2 processes"] -.-> kernelB["kernel B: uprobes + maps"]
             kernelB --> daemonB["ros2ebpfd (host B)<br/>/metrics"]
@@ -116,7 +117,7 @@ ros2ebpf/
 ├── ros2ebpf_daemon/           # ros2ebpfd (C, libbpf, CMake; no ROS dependency)
 │   ├── bpf/                   # BPF C programs: rmw_probes.bpf.c, udp_drops.bpf.c, vmlinux_min.h
 │   ├── src/                   # loader (probes.c), identity, control socket, config, offsets, main, ros2ebpf-ctl
-│   ├── offsets/               # per-(distro, arch) struct offset table tooling (gen.sh)
+│   ├── offsets/               # struct offset table tooling (gen.sh): rolling/<arch> rows
 │   └── config/                # config.example.yaml, expectations.example.yaml
 ├── ros2ebpf_exporter/         # map reader + Prometheus exposition (C library + ros2ebpf-exporter binary)
 │   └── include/ros2ebpf/maps.h   # THE map contract shared by BPF, daemon and exporter
@@ -124,9 +125,9 @@ ros2ebpf/
 ├── deploy/
 │   ├── alloy/                 # collector configuration for a robot host
 │   ├── k8s/                   # DaemonSet for ros2ebpfd + Alloy; central Prometheus/Alertmanager/Grafana manifests
-│   ├── prometheus/            # rules/ros2.yaml, alertmanager.yml, prometheus.yml
+│   ├── prometheus/            # rules/ros2.yaml, alertmanager.yml, prometheus.yml (central), prometheus-local.yml (one host)
 │   └── grafana/               # provisioning + dashboards: fleet, robot, host, daemon health
-├── docker/                    # Dockerfile.{daemon,cli,demo}
+├── docker/                    # Dockerfile: the ros2ebpfd image of the Kubernetes DaemonSet
 ├── scripts/github_workflows.sh  # CI: rolling source build, tests, end-to-end
 └── docs/
 ```
@@ -151,7 +152,7 @@ ros2ebpf/
 ### 4.1 Responsibilities
 
 - Not a ROS node: no rclpy, no DDS participant, no sourced workspace at runtime.
-- Inputs: zero or more shim paths (`librmw_implementation.so`), a per-(distro, arch) struct offset table, `/etc/ros2ebpf/config.yaml`.
+- Inputs: zero or more shim paths (`librmw_implementation.so`), the per-architecture struct offset table, `/etc/ros2ebpf/config.yaml`.
 - **Attach**: resolves symbols to inode+offset (PID-independent, so processes started later are covered), verifies that the ELF exports the expected `rmw_*` symbols, and attaches `rmw_*` uprobes/uretprobes, `rmw_destroy_*` cleanup probes, `sched_process_exit`, and the UDP drop tracepoint.
   Shims used by containers are discovered through `/proc/<pid>/maps` (§13).
 - **Maps**: pinned under `/sys/fs/bpf/ros2ebpf/` so counters survive daemon restarts and so a separate reader can open them.
@@ -174,7 +175,7 @@ The first argument of each call is a public `rmw/types.h` struct carrying the na
 | `rmw_take_request`, `rmw_send_response` | `rmw_service_t *` | `service_name` |
 | `rmw_destroy_publisher` / `rmw_destroy_subscription` / ... | handle is **arg1** (arg0 is the node) | cleanup |
 
-Offsets are ABI, verified per (distro, arch) at build (`offsets/gen.sh`) and at runtime (the probe also reads `implementation_identifier` from offset 0 of every handle; a value not starting with `rmw_` is reported as `ros2ebpf_unknown_rmw_processes`).
+Offsets are ABI, verified per architecture against mainline `rmw` in CI (`offsets/gen.sh`) and at runtime (the probe also reads `implementation_identifier` from offset 0 of every handle; a value not starting with `rmw_` is reported as `ros2ebpf_unknown_rmw_processes`).
 Mixed fleets are the norm, so the table is keyed by both and the daemon exports which entry it used.
 
 ### 4.3 Host, robot and domain identity
@@ -306,9 +307,7 @@ See `docs/metrics.md` for the full reference with PromQL examples.
 host: ""                      # empty = kernel hostname
 robot: ""                     # optional fallback; normally set by the collector's external label
 shims:
-  - distro: rolling
-    arch: x86_64
-    path: /opt/ros/rolling/lib/librmw_implementation.so
+  - path: /opt/ros/rolling/lib/librmw_implementation.so   # or the one of a Rolling source build
 discover_shims: true          # also find shims used by containers through /proc/<pid>/maps
 identity:
   read_environ: true          # needs CAP_SYS_PTRACE; otherwise domain_id="unknown"
@@ -414,7 +413,7 @@ The full procedures, including the multi-host robot setup, are in `README.md` an
 
 - Linux ≥ 5.8 (`CAP_BPF`, ring buffer), BTF available (`/sys/kernel/btf/vmlinux`) for CO-RE and `tp_btf` tracepoints; the `ros2 ebpf doctor` verb checks this.
 - bpffs mounted at `/sys/fs/bpf`.
-- ROS 2 binaries installed from Debian packages (the offset table is keyed on the distro's shipped `librmw_implementation.so`; a from-source build needs its own row, generated with `ros2ebpf_daemon/offsets/gen.sh`).
+- ROS 2 Rolling, binaries (`/opt/ros/rolling`) or a source build; the offset table row for the architecture is checked against mainline `rmw` in CI (`ros2ebpf_daemon/offsets/gen.sh`), and a shim of any other distro is refused.
 - Capabilities for `ros2ebpfd`: `CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_PTRACE` (identity), and `CAP_SYS_RESOURCE` if the map memlock limit is raised.
   Running as root is the simple alternative; never as a ROS user.
 
@@ -445,7 +444,7 @@ Pinned maps survive stop/start, so counters do not reset.
 
 ### 9.4 Verifying an installation
 
-1. `ros2 ebpf status` on each host: all configured probe families attached, offset table matches the distro, exporter mode `inprocess`, identity shows the expected `robot`.
+1. `ros2 ebpf status` on each host: all configured probe families attached, offset table `rolling/<arch>`, exporter mode `inprocess`, identity shows the expected `robot`.
 2. `curl host:9477/metrics`: `ros2ebpf_host_info` present with correct `machine_id`; `ros2_process_info` lists the running nodes with non-`unknown` `domain_id`.
 3. Central Prometheus: `up{job="ros2ebpf"}` is 1 for every host of every robot; the `Ros2ebpfProbesMissing` and `Ros2ebpfHostDown` alerts are inactive.
 4. Grafana "ROS 2 fleet" dashboard shows publish rates per `(robot, host, topic)`; stop one talker and watch `Ros2TopicRateLow` fire for that robot within ~90 s.
@@ -475,10 +474,10 @@ Cost is per host and does not grow with the number of hosts on the domain; serie
    In a mixed-vendor robot seq-gap coverage differs per host; `ros2_process_info{rmw}` says where it applies.
 4. **Cross-host loss is a rate inequality, not a count**: no shared clock, so no per-message matching across hosts; the rules compare rates over the same window and need an expected taker count to be exact.
 5. **Domain ID coverage**: resolved from the environment only (phase 2: `rcl_init`); unreadable processes report `unknown`.
-6. **Mixed architectures**: x86_64 and aarch64 covered (LP64, arg0 in `rdi` / `x0`); the BPF object is built per arch and offsets verified per (distro, arch).
+6. **Mixed architectures**: x86_64 and aarch64 covered (LP64, arg0 in `rdi` / `x0`); the BPF object is built per arch and offsets verified per arch.
 7. **Exporter sinks**: Prometheus text only in phase 1; OTLP push and a ROS topic sink are the motivating cases for the external exporter mode.
 8. Linux-only; `CAP_BPF` + `CAP_PERFMON` (+ `CAP_SYS_PTRACE` for identity); containerised nodes need the shim resolved through `/proc/<pid>/root`.
-9. Offsets are ABI, not API; the per-(distro, arch) table and the runtime identifier check are the mitigation until a stable hook exists.
+9. Offsets are ABI, not API; the per-architecture table checked against mainline in CI and the runtime identifier check are the mitigation until a stable hook exists.
 10. **Short-lived endpoints**: counters live with the endpoint.
     A client that is created, used once and destroyed (e.g. a one-shot `add_two_ints_client`) leaves no series behind; the server side of the same call is the durable record.
 
@@ -498,7 +497,7 @@ Decisions taken while building the first version, where they refine rev. 3:
 |---|---|---|---|
 | Hot counters | `PERCPU_HASH` | one `HASH` per endpoint, atomic adds (`__sync_fetch_and_add`) | the interval histogram needs `last_ns` shared across CPUs anyway; at ROS rates the atomic is negligible and the exporter stays trivial |
 | Tracepoints | `tracepoint/...` | `tp_btf/sched_process_exit`, `tp_btf/udp_fail_queue_rcv_skb` | plain tracepoints need tracefs, which containers do not have; `tp_btf` needs only BTF, and hands over `struct sock *` so the UDP probe works on kernels before and after the 6.11 tracepoint signature change |
-| Shims | static list per host | static list **plus discovery**: `/proc/<pid>/maps` is scanned every 5 s for `librmw_implementation.so`, keyed by the mapped file's `dev:inode` (the real inode even through overlayfs), attached via `/proc/<pid>/root/<path>` | a daemon on the host (or in a `pid: host` container) then covers ROS processes in any container without configuration; verified against Jazzy nodes in a container |
+| Shims | static list per host | static list **plus discovery**: `/proc/<pid>/maps` is scanned every 5 s for `librmw_implementation.so`, keyed by the mapped file's `dev:inode` (the real inode even through overlayfs), attached via `/proc/<pid>/root/<path>` | a daemon on the host (or in a `pid: host` container) then covers ROS processes in any container without configuration; verified against Rolling nodes in a container |
 | Pin layout | `/sys/fs/bpf/ros2ebpf/<shim-id>/` | one map set under `/sys/fs/bpf/ros2ebpf/`, `config.abi` field checked at start; incompatible pins are recreated | maps are keyed by `(pid, handle)` so one set serves every shim; a per-shim split would only complicate the exporter |
 | Process exit | BPF deletes keys | BPF pushes `EXIT_PID` to the ring buffer; the daemon sweeps the maps in user space; a 30 s GC sweeps dead pids as a safety net | BPF cannot iterate a hash map by a key prefix; user space can, off the hot path |
 | Service metrics | `_request_total` / `_response_total` | same names with a `side` label (`client` / `server`) | both ends of a call are observable (`rmw_send_request` + `rmw_take_request`), and the server side is the durable record for short-lived clients |

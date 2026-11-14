@@ -1,10 +1,9 @@
 host: main
 robot: amr-07
 shims:
-  - distro: rolling
-    arch: x86_64
+  - arch: x86_64
     path: /opt/ros/rolling/lib/librmw_implementation.so
-  - path: /opt/ros/humble/lib/librmw_implementation.so
+  - path: /ws/install/lib/librmw_implementation.so
 discover_shims: false
 identity:
   read_environ: true
@@ -29,6 +28,5 @@ control:
   http: 0.0.0.0:9478
 expectations_file: /etc/ros2ebpf/exp.yaml
 pin_root: /sys/fs/bpf/test
-offset_table: jazzy/aarch64
 log_level: debug
 unknown_key: ignored

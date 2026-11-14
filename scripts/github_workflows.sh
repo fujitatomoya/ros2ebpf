@@ -7,7 +7,7 @@
 # build inside the ros2dev container image, see
 # https://github.com/fujitatomoya/ros2_devenv_builder
 #
-# ros2ebpf follows rolling only (fujitatomoya/ros2ebpf#8): the daemon
+# ros2ebpf follows rolling only (fujitatomoya/ros2ebpf#8, #15): the daemon
 # probes librmw_implementation.so through struct offsets of rmw, and the
 # CLI is a ros2cli plugin. Mainline head of rmw, rmw_implementation,
 # ros2cli and demo_nodes_cpp (with everything they need) is built from
@@ -26,6 +26,9 @@
 #
 #   docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src \
 #     tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh
+#
+# The interactive version of the same build, in the same container, is
+# README section 4 (development container); docs/development.md has the rest.
 #
 #####################################################################
 
@@ -165,11 +168,11 @@ function verify_daemon () {
     echo "[${FUNCNAME[0]}]: load the BPF objects, probe the mainline librmw_implementation.so, query the daemon."
     cd ${COLCON_WORKSPACE}
     mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
+    # the shim of the source build is not under /opt/ros/: the daemon takes it for rolling
     cat > /tmp/ci.yaml <<YAML
 host: e2e
 shims:
   - path: ${COLCON_WORKSPACE}/install/lib/librmw_implementation.so
-    distro: ${ROS_DISTRO}
 discover_shims: false
 exporter: {listen: 127.0.0.1:19477}
 control: {socket: /tmp/r2e.sock}
@@ -292,7 +295,8 @@ function end_to_end () {
 
 export DEBIAN_FRONTEND=noninteractive
 export COLCON_WORKSPACE=/tmp/colcon_ws
-export ROS_DISTRO=${ROS_DISTRO:-rolling}
+# rolling only (#15): the branch of ros2.repos, and the row of the offset table that is checked
+export ROS_DISTRO=rolling
 export ROS2EBPF_PACKAGES="ros2ebpf_exporter ros2ebpf_daemon ros2ebpf_interfaces ros2ebpf"
 
 # mark the working space root directory, so that we can come back anytime with `cd $there`

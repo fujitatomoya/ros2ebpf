@@ -99,9 +99,9 @@ int main(void)
         { .topic = "/chatter", .hz = 10, .takers = 1 },
         { .topic = "/odom", .hz = 50, .takers = -1 },
     };
-    struct ros2ebpf_host_info hi = { .host = "main", .machine_id = "abc", .distro = "ubuntu-24.04",
-                                     .arch = "x86_64", .kernel = "6.8", .shim_path = "/opt/ros/jazzy/lib/librmw_implementation.so",
-                                     .offset_table = "jazzy/x86_64", .exporter_mode = "inprocess" };
+    struct ros2ebpf_host_info hi = { .host = "main", .machine_id = "abc", .distro = "ubuntu-26.04",
+                                     .arch = "x86_64", .kernel = "7.0", .shim_path = "/opt/ros/rolling/lib/librmw_implementation.so",
+                                     .offset_table = "rolling/x86_64", .exporter_mode = "inprocess" };
     struct ros2ebpf_export_opts o = {
         .host = "main", .host_info = &hi, .expectations = exp, .n_expectations = 2,
         .probes_attached = 12, .probes_configured = 12, .environ_read_failures = 1,
@@ -148,7 +148,7 @@ int main(void)
     /* process / host info / self health */
     CHECK(strstr(t, "ros2_process_info{host=\"main\",comm=\"talker\",pid=\"100\",domain_id=\"0\",rmw=\"rmw_fastrtps_cpp\",container=\"\",localhost_only=\"false\"} 1\n"));
     CHECK(strstr(t, "ros2_process_info{host=\"main\",comm=\"listener\",pid=\"200\",domain_id=\"7\",rmw=\"rmw_fastrtps_cpp\",container=\"\",localhost_only=\"false\"} 1\n"));
-    CHECK(strstr(t, "ros2ebpf_host_info{host=\"main\",machine_id=\"abc\",distro=\"ubuntu-24.04\",arch=\"x86_64\",kernel=\"6.8\",shim_path=\"/opt/ros/jazzy/lib/librmw_implementation.so\",offset_table=\"jazzy/x86_64\",exporter_mode=\"inprocess\"} 1\n"));
+    CHECK(strstr(t, "ros2ebpf_host_info{host=\"main\",machine_id=\"abc\",distro=\"ubuntu-26.04\",arch=\"x86_64\",kernel=\"7.0\",shim_path=\"/opt/ros/rolling/lib/librmw_implementation.so\",offset_table=\"rolling/x86_64\",exporter_mode=\"inprocess\"} 1\n"));
     CHECK(strstr(t, "ros2ebpf_probes_attached{host=\"main\"} 12\n"));
     CHECK(strstr(t, "ros2ebpf_unknown_rmw_processes{host=\"main\"} 1\n"));
     CHECK(strstr(t, "ros2ebpf_unresolved_endpoints{host=\"main\"} 1\n"));

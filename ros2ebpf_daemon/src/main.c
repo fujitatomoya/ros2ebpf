@@ -372,7 +372,6 @@ static struct json_object *config_json(struct daemon *d)
     struct json_object *shims = json_object_new_array();
     for (int i = 0; i < c->n_shims; i++) {
         struct json_object *s = json_object_new_object();
-        json_object_object_add(s, "distro", jstr(c->shims[i].distro));
         json_object_object_add(s, "arch", jstr(c->shims[i].arch));
         json_object_object_add(s, "path", jstr(c->shims[i].path));
         json_object_array_add(shims, s);
@@ -416,7 +415,6 @@ static struct json_object *config_json(struct daemon *d)
     json_object_object_add(o, "control", co);
     json_object_object_add(o, "expectations_file", jstr(c->expectations_file));
     json_object_object_add(o, "pin_root", jstr(c->pin_root));
-    json_object_object_add(o, "offset_table", jstr(c->offset_table));
     return o;
 }
 
@@ -577,8 +575,12 @@ int main(int argc, char **argv)
         int bad = 0;
         printf("config: %s ok\n", d.cfg.path);
         for (int i = 0; i < d.cfg.n_shims; i++) {
-            char missing[512];
-            if (offsets_check_shim(d.cfg.shims[i].path, missing, sizeof(missing))) {
+            char missing[512], distro[32];
+            if (offsets_distro_from_path(d.cfg.shims[i].path, distro, sizeof(distro)) == 0 &&
+                !offsets_lookup(distro, d.host_arch)) {
+                printf("shim %s: FAIL (ROS 2 %s: ros2ebpf follows Rolling only)\n", d.cfg.shims[i].path, distro);
+                bad = 1;
+            } else if (offsets_check_shim(d.cfg.shims[i].path, missing, sizeof(missing))) {
                 printf("shim %s: FAIL (%s)\n", d.cfg.shims[i].path, missing);
                 bad = 1;
             } else {

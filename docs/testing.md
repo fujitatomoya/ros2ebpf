@@ -12,7 +12,7 @@
 | `ros2ebpf/test/test_daemon.py` | `ros2 ebpf start` / `stop`: command line (sudo or not), log file, spawn detached, wait for the socket, stop through the `stop` RPC, failure paths (exit before answering, timeout, missing binary / config), against a fake `ros2ebpfd` executable | same |
 
 `colcon test --merge-install && colcon test-result --verbose` in the workspace (the C tests go through `ament_add_test`).
-The whole CI script, including the end-to-end test below, runs locally with `docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh`.
+The whole CI script, including the end-to-end test below, runs locally in the development container ([development.md](development.md), Build).
 
 ## 2. End-to-end (CI, every commit)
 
@@ -36,9 +36,7 @@ Assertions on `ros2ebpf-ctl metrics`:
 - counters survive `ros2 ebpf stop` + `ros2 ebpf start` (pinned maps);
 - `ros2 ebpf status` and `ros2 ebpf top --once` (mainline ros2cli) against the daemon.
 
-The `images` job covers the cross-container case of README tutorial C: `ros2ebpfd:ci` with `--pid host --privileged` and no config discovers the shim of the `ros2ebpf-demo:ci` container through `/proc/<pid>/root` and counts its talker.
-
-Last verified run (Ubuntu 24.04 host, kernel 7.0, ros2dev:rolling container, mainline source):
+Last verified run (kernel 7.0 host, ros2dev:rolling container, mainline source):
 
 ```
 PASS talker publishes /chatter in domain 5
@@ -59,11 +57,11 @@ PASS counters survived daemon restart (13 -> 17)
 e2e: all checks passed
 ```
 
-## 3. Host-only check (needs root on a ROS 2 host)
+## 3. Quick check in the development container (README §4)
 
 ```bash
-sudo install/bin/ros2ebpfd --check -c /etc/ros2ebpf/config.yaml
-sudo -v && ros2 ebpf start --log-level debug
+ros2ebpfd --check -c /etc/ros2ebpf/config.yaml
+ros2 ebpf start --log-level debug
 ros2 run demo_nodes_cpp talker &
 ros2 ebpf status
 curl -s localhost:9477/metrics | grep chatter
@@ -78,10 +76,10 @@ Prerequisites: two or more hosts on one LAN, `ros2ebpfd` on each (package or con
 
 | # | Step | Expected |
 |---|---|---|
-| 1 | `ros2ebpf-ctl status -q` on every host | exit 0; `ros2ebpf_host_info` with distinct `host`, correct `distro`/`arch`/`offset_table` |
+| 1 | `ros2ebpf-ctl status -q` on every host | exit 0; `ros2ebpf_host_info` with distinct `host`, correct `arch`/`offset_table` (`rolling/<arch>`) |
 | 2 | collector scraping all hosts | `up{job="ros2ebpf"}` = 1 per host in central, `robot` label set |
 | 3 | talker on host A, listener on host B, same domain | `rate(ros2_rmw_publish_total{host="A"}[1m])` ≈ `rate(ros2_rmw_take_total{host="B"}[1m])` |
-| 4 | mixed distro / arch (e.g. Humble on an aarch64 host) | step 3 holds; `offset_table` differs per host; `ros2ebpf_name_read_failures_total` stays 0 |
+| 4 | mixed arch (an aarch64 host next to x86_64 ones) | step 3 holds; `offset_table` is `rolling/aarch64` there; `ros2ebpf_name_read_failures_total` stays 0 |
 | 5 | a node in a container on host B | `ros2_process_info{host="B",container!=""}`; counted like any other |
 | 6 | `ros2 ebpf status --robot <name>` from the operator machine (fleet.yaml, ssh) | one healthy row per host |
 | 7 | expectations with `takers`; stop the listener on B | `Ros2CrossHostLoss` fires within ~3 min; resolves after restart |

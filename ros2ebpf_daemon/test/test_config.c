@@ -24,9 +24,9 @@ int main(int argc, char **argv)
     CHECK(!strcmp(c.host, "main"));
     CHECK(!strcmp(c.robot, "amr-07"));
     CHECK(c.n_shims == 2);
-    CHECK(!strcmp(c.shims[0].distro, "rolling") && !strcmp(c.shims[0].arch, "x86_64") &&
+    CHECK(!strcmp(c.shims[0].arch, "x86_64") &&
           !strcmp(c.shims[0].path, "/opt/ros/rolling/lib/librmw_implementation.so"));
-    CHECK(!strcmp(c.shims[1].path, "/opt/ros/humble/lib/librmw_implementation.so") && !c.shims[1].distro[0]);
+    CHECK(!strcmp(c.shims[1].path, "/ws/install/lib/librmw_implementation.so") && !c.shims[1].arch[0]);
     CHECK(c.discover_shims == 0);
     CHECK(c.read_environ == 1 && c.default_domain_id == 3);
     CHECK(c.probe_publish == 1 && c.probe_take == 1 && c.probe_services == 0 && c.probe_udp_drops == 1);
@@ -38,7 +38,6 @@ int main(int argc, char **argv)
     CHECK(!strcmp(c.control_socket, "/tmp/ctl.sock") && !strcmp(c.control_http, "0.0.0.0:9478"));
     CHECK(!strcmp(c.expectations_file, "/etc/ros2ebpf/exp.yaml"));
     CHECK(!strcmp(c.pin_root, "/sys/fs/bpf/test"));
-    CHECK(!strcmp(c.offset_table, "jazzy/aarch64"));
     CHECK(c.log_level == LOG_DEBUG);
 
     /* seq_gap: all */
@@ -59,13 +58,19 @@ int main(int argc, char **argv)
     CHECK(config_runtime_immutable_changed(&c, &c2) == 1);
     CHECK(config_runtime_immutable_changed(&c, &c) == 0);
 
-    /* offsets */
-    const struct offset_entry *e = offsets_lookup("jazzy", "x86_64");
+    /* offsets: Rolling only, x86_64 and aarch64 */
+    const struct offset_entry *e = offsets_lookup("rolling", "x86_64");
     CHECK(e && e->name_off == 16 && e->msginfo_pubseq == 16);
-    CHECK(offsets_lookup("foxy", "x86_64") == NULL);
-    CHECK(offsets_lookup("lp64", "riscv64") != NULL);
+    e = offsets_lookup("rolling", "aarch64");
+    CHECK(e && e->name_off == 16 && e->msginfo_pubseq == 16);
+    CHECK(offsets_lookup("humble", "x86_64") == NULL);
+    CHECK(offsets_lookup("rolling", "riscv64") == NULL);
+    CHECK(offsets_lookup("", "x86_64") == NULL);
     char d[32];
-    CHECK(offsets_distro_from_path("/proc/123/root/opt/ros/humble/lib/librmw_implementation.so", d, sizeof(d)) == 0 && !strcmp(d, "humble"));
+    CHECK(offsets_distro_from_path("/proc/123/root/opt/ros/rolling/lib/librmw_implementation.so", d, sizeof(d)) == 0 && !strcmp(d, "rolling"));
+    CHECK(offsets_distro_from_path("/opt/ros/humble/lib/librmw_implementation.so", d, sizeof(d)) == 0 && !strcmp(d, "humble"));
+    /* a source build: not under /opt/ros, taken for Rolling by the daemon */
+    CHECK(offsets_distro_from_path("/ws/install/lib/librmw_implementation.so", d, sizeof(d)) != 0);
     CHECK(offsets_distro_from_path("/usr/lib/librmw_implementation.so", d, sizeof(d)) != 0);
     char missing[256];
     CHECK(offsets_check_shim("/nonexistent.so", missing, sizeof(missing)) != 0);

@@ -3,43 +3,38 @@
 ## Build
 
 All four packages are ROS 2 packages built with colcon: `ros2ebpf_exporter`, `ros2ebpf_daemon` and `ros2ebpf_interfaces` are `ament_cmake`, `ros2ebpf` is `ament_python`.
-The repository root is a colcon workspace by itself (`build/`, `install/`, `log/` are git-ignored); it can also be cloned into `src/` of a larger workspace.
-The daemon and exporter use ament only at build time: nothing from ROS is needed on the host they run on.
+The daemon and exporter use ament only at build time: nothing from ROS is needed where they run.
 
-ros2ebpf follows ROS 2 **Rolling** only: everything (implementation, CI, documentation) tracks Rolling, CI tests against a Rolling source build, and a distro branch is created when the next ROS release is branched.
-Nothing is backported before that.
+ros2ebpf follows ROS 2 **Rolling** only (#15): one row per architecture in the offset table, one CI job, one build procedure, all against a Rolling source build on Ubuntu 26.04, in a container.
+A distro branch is created when the next ROS release is branched; nothing is backported before that, and nothing in the tree names another distro.
 
-Native (Ubuntu 26.04, ROS 2 Rolling binaries):
+The build procedure is README §4: start the development container (4.1: `--privileged --pid host --network host`, the workspace mounted), build mainline and the ros2ebpf packages (4.2).
+The repository is cloned into `src/` of that workspace; it is a colcon workspace by itself too (`build/`, `install/`, `log/` are git-ignored) when the Rolling install is sourced from elsewhere.
+What development adds, in the same container:
 
 ```bash
-sudo apt install -y build-essential cmake pkg-config clang llvm libbpf-dev bpftool \
-     libelf-dev zlib1g-dev libyaml-dev libjson-c-dev \
-     python3-yaml python3-pytest python3-flake8 \
-     ros-rolling-ament-cmake ros-rolling-ros2cli python3-colcon-common-extensions
-source /opt/ros/rolling/setup.bash
-colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
-colcon test --merge-install && colcon test-result --verbose
+apt install -y python3-pytest python3-flake8
+colcon test --merge-install --packages-select ros2ebpf_exporter ros2ebpf_daemon ros2ebpf_interfaces ros2ebpf
+colcon test-result --verbose
+(cd src/ros2ebpf/ros2ebpf && python3 -m flake8 --select=E,W,F --extend-ignore=W503 --max-line-length=120 ros2ebpf test)
+sh src/ros2ebpf/ros2ebpf_daemon/offsets/gen.sh install     # the offset row of this Rolling build; must equal the one in src/offsets.c
 ```
 
-`--merge-install` gives one prefix (`install/bin`, `install/etc/ros2ebpf`) that the tutorials and the container images rely on; without it every package gets its own prefix under `install/<pkg>/`.
-
-`rosdep install --from-paths . --ignore-src -y --skip-keys "libbpf-dev bpftool"` resolves the remaining dependencies; `libbpf-dev` and `bpftool` have no rosdep key yet (see Packaging below) and are installed by hand as above.
-
-Exactly what CI runs, with nothing installed on the host (privileged for the BPF programs):
+Everything CI does, unattended, in a throwaway container of the same image (nothing but the clone on the host; privileged for the BPF programs, host pid namespace for the daemon):
 
 ```bash
 docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh
 ```
 
-That is the Rolling *source* build: `scripts/github_workflows.sh` imports `ros2.repos` of mainline and builds `rmw`, `rmw_implementation`, `ros2cli` and `demo_nodes_cpp` with everything they need (about 170 packages, a few minutes on a workstation) plus the ros2ebpf packages with colcon.
+`scripts/github_workflows.sh` imports `ros2.repos` of mainline and builds `rmw`, `rmw_implementation`, `ros2cli` and `demo_nodes_cpp` with everything they need plus the ros2ebpf packages, as in README 4.2.
 It then runs the unit tests and flake8, checks the offset table in `ros2ebpf_daemon/src/offsets.c` against the mainline `rmw` headers (`offsets/gen.sh`), starts the daemon on the kernel with its uprobes attached to the mainline-built `librmw_implementation.so` (all probe links must attach and the `rolling/<arch>` offset table must be in use), drives it with `ros2 ebpf start` / `stop` on the mainline ros2cli, and runs the end-to-end test with the mainline demo nodes (docs/testing.md).
-The image comes from [ros2_devenv_builder](https://github.com/fujitatomoya/ros2_devenv_builder) and carries every ROS build dependency; the script adds the BPF toolchain.
 
 Build options (`--cmake-args`): `-DBUILD_TESTING=OFF` skips the unit tests, `-DBPF_TARGET_ARCH=arm64` cross-compiles the BPF objects.
 The C tests are registered with `ament_add_test`, so `colcon test-result` sees them like any other ROS package's tests.
+`--merge-install` gives one prefix (`install/bin`, `install/etc/ros2ebpf`) that the tutorials, the CI script and the container images rely on; without it every package gets its own prefix under `install/<pkg>/`.
+`libbpf-dev` and `bpftool` have no rosdep key yet (see Releasing below), so `rosdep install` needs `--skip-keys "libbpf-dev bpftool"` and they are installed by hand.
 
-
-Cross build for aarch64: `-DBPF_TARGET_ARCH=arm64` for the BPF objects plus a normal CMake toolchain file for the user-space parts; `docker buildx build --platform linux/arm64 -f docker/Dockerfile.daemon .` is the simplest route.
+Cross build for aarch64: `-DBPF_TARGET_ARCH=arm64` for the BPF objects plus a normal CMake toolchain file for the user-space parts; `docker buildx build --platform linux/arm64 -f docker/Dockerfile .` is the simplest route.
 
 ## Layout and responsibilities
 
@@ -58,7 +53,7 @@ ros2ebpf_daemon/src/probes.c                skeletons, pin root, shim registry +
 ros2ebpf_daemon/src/identity.c              /proc -> processes map, exit sweep, GC
 ros2ebpf_daemon/src/control.c               JSON-RPC over unix socket / HTTP
 ros2ebpf_daemon/src/config.c                libyaml -> struct config
-ros2ebpf_daemon/src/offsets.c               (distro, arch) -> struct offsets; ELF symbol check
+ros2ebpf_daemon/src/offsets.c               rolling/<arch> -> struct offsets; ELF symbol check
 ros2ebpf_daemon/src/udpmap.c                port -> pid/comm via /proc/net/udp + /proc/<pid>/fd
 ros2ebpf_daemon/src/main.c                  epoll loop, RPC handlers, reload
 ros2ebpf_daemon/src/ros2ebpf-ctl.c          thin control client
@@ -101,13 +96,13 @@ New methods are added to `handle_rpc()` in `main.c`, to the schema, and get a ve
 
 ## Releasing
 
-The packages are source packages; binaries come from the ROS build farm (bloom release, then `ros-<distro>-ros2ebpf-*` under `/opt/ros/<distro>`) like for any ROS 2 package, and nothing is packaged in this repository.
+The packages are source packages; binaries come from the ROS build farm (bloom release, then `ros-rolling-ros2ebpf-*` under `/opt/ros/rolling`) like for any ROS 2 package, and nothing is packaged in this repository.
 Prerequisite: rosdep keys for `libbpf-dev` and `bpftool` (a `ros/rosdistro` pull request); until they exist `rosdep install` needs `--skip-keys "libbpf-dev bpftool"`.
 The daemon links the exporter library statically and installs the example configs to `etc/ros2ebpf/`; it reads `/etc/ros2ebpf/config.yaml` by default.
-There is no service file: the daemon is started on request with `ros2 ebpf start` (README 4.3) or as the Kubernetes DaemonSet.
+There is no service file: the daemon is started on request with `ros2 ebpf start` (README 4.4) or as the Kubernetes DaemonSet.
 
-Container images for the deployments under `deploy/`: `docker/Dockerfile.daemon` (daemon + exporter
-+ ctl on Ubuntu 26.04, built from rolling binaries), `docker/Dockerfile.cli`, `docker/Dockerfile.demo`.
+`docker/Dockerfile` is the one container image: `ros2ebpfd` + exporter + `ros2ebpf-ctl` on Ubuntu 26.04, built from Rolling binaries, for the Kubernetes DaemonSet under `deploy/k8s/robot/`.
+Everything else runs in the development container (README §4).
 
 ## Deploy sources of truth
 
@@ -131,7 +126,6 @@ There are no release branches yet: the first one is created when the packages ar
 
 - `rolling`: `scripts/github_workflows.sh` inside the `tomoyafujita/ros2dev:rolling` container (privileged): Rolling source build of `rmw` / `rmw_implementation` / `ros2cli` / `demo_nodes_cpp`, `colcon build` + `colcon test` of all packages, flake8, offset table vs. mainline `rmw`, the daemon probing the mainline `librmw_implementation.so` (BPF verifier, all links attached), `ros2 ebpf` on mainline ros2cli, and the end-to-end test with the mainline demo nodes.
   The workflow file only calls the script, so CI changes are script changes that run identically with the `docker run` above.
-- `images`: the daemon, CLI and demo images on Rolling binaries (`ros:rolling-*`, Ubuntu 26.04), `ros2 ebpf --help` in the CLI image, and the daemon in its own container discovering the demo container's shim through `/proc` (README tutorial C).
-- `deploy-lint`: `deploy/k8s/sync.sh` must leave no diff, then validation of everything under `deploy/` (promtool, amtool, kustomize, alloy fmt).
+- `deploy-lint`: `deploy/k8s/sync.sh` must leave no diff, then validation of everything under `deploy/` (promtool on both Prometheus configs and the rules, amtool, kustomize, alloy fmt) and a build of the DaemonSet image (`docker/Dockerfile`).
 
 When a release branch is created, its workflow is a copy of the `rolling` job with the distro's `ros2dev` image, as in the other `fujitatomoya` repositories.

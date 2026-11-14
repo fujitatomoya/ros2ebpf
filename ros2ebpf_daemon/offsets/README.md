@@ -8,21 +8,24 @@
 | `publication_sequence_number` | `rmw_message_info_t` (arg 3 of `rmw_take_with_info`) | sequence-gap detection |
 
 These are ABI, not API.
-The offsets are the same (16 and 16) on every LP64 target from Humble to Rolling because the handle layout `{ implementation_identifier, data, <name> }` has not changed, but the daemon still keys them by `(distro, arch)` in `src/offsets.c` and exports the row it used as `ros2ebpf_host_info{offset_table="..."}` so a future change on one distro is caught per host instead of silently misreading names.
+ros2ebpf follows ROS 2 Rolling only (#15), so `src/offsets.c` has one row per supported architecture, `rolling/x86_64` and `rolling/aarch64`.
+CI regenerates the values from the `rmw` headers of mainline on every commit (`check_rmw_offsets` in `scripts/github_workflows.sh`) and fails when the row is stale, and the daemon exports the row it uses as `ros2ebpf_host_info{offset_table="rolling/<arch>"}`.
+A shim under `/opt/ros/rolling/` or anywhere else (the `install/` of a source build) is Rolling; a shim under `/opt/ros/<other distro>/` is refused.
 
-A mismatch shows up as `ros2ebpf_name_read_failures_total` increasing and/or `ros2ebpf_unknown_rmw_processes > 0` (the identifier read from offset 0 does not start with `rmw_`).
+A mismatch (a Rolling install older or newer than the row) shows up as `ros2ebpf_name_read_failures_total` increasing and/or `ros2ebpf_unknown_rmw_processes > 0` (the identifier read from offset 0 does not start with `rmw_`).
 
-## Adding a row
+## Updating the row
 
-On a machine with the target ROS 2 installation and a C compiler:
+In the development container (README §4), or on any machine with the Rolling installation and a C compiler:
 
 ```
-./gen.sh /opt/ros/<distro>
-# distro=jazzy arch=x86_64
+./gen.sh /ws/install            # or /opt/ros/rolling
+# distro=rolling arch=x86_64
 pub.topic_name=16
 ...
 # src/offsets.c row:
-    { "jazzy", "x86_64", 16, 16 },
+    { "rolling", "x86_64", 16, 16 },
 ```
 
-Paste the row into the table in `src/offsets.c`, or set `offset_table: <distro>/<arch>` in `config.yaml` to force an existing row, or rely on the `lp64` fallback row (used with a warning when the distro is unknown).
+Replace the row in `src/offsets.c` and rebuild.
+`gen.sh` needs the merged layout: `/opt/ros/rolling`, or a workspace built with `--merge-install`.
