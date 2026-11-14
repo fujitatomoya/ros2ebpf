@@ -1,4 +1,4 @@
-# Prometheus for one host (README tutorial A, section 4.6): scrapes ros2ebpfd directly,
+# Prometheus for one host (README section 4.6): scrapes ros2ebpfd directly,
 # no collector, no remote_write, no Alertmanager (the rules still evaluate and show on /alerts).
 # Every container of the tutorial runs on the host network, so the daemon is localhost:9477.
 # From the repository root:

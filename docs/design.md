@@ -127,7 +127,7 @@ ros2ebpf/
 │   ├── k8s/                   # DaemonSet for ros2ebpfd + Alloy; central Prometheus/Alertmanager/Grafana manifests
 │   ├── prometheus/            # rules/ros2.yaml, alertmanager.yml, prometheus.yml (central), prometheus-local.yml (one host)
 │   └── grafana/               # provisioning + dashboards: fleet, robot, host, daemon health
-├── docker/                    # Dockerfile.{daemon,cli,demo}
+├── docker/                    # Dockerfile: the ros2ebpfd image of the Kubernetes DaemonSet
 ├── scripts/github_workflows.sh  # CI: rolling source build, tests, end-to-end
 └── docs/
 ```
@@ -497,7 +497,7 @@ Decisions taken while building the first version, where they refine rev. 3:
 |---|---|---|---|
 | Hot counters | `PERCPU_HASH` | one `HASH` per endpoint, atomic adds (`__sync_fetch_and_add`) | the interval histogram needs `last_ns` shared across CPUs anyway; at ROS rates the atomic is negligible and the exporter stays trivial |
 | Tracepoints | `tracepoint/...` | `tp_btf/sched_process_exit`, `tp_btf/udp_fail_queue_rcv_skb` | plain tracepoints need tracefs, which containers do not have; `tp_btf` needs only BTF, and hands over `struct sock *` so the UDP probe works on kernels before and after the 6.11 tracepoint signature change |
-| Shims | static list per host | static list **plus discovery**: `/proc/<pid>/maps` is scanned every 5 s for `librmw_implementation.so`, keyed by the mapped file's `dev:inode` (the real inode even through overlayfs), attached via `/proc/<pid>/root/<path>` | a daemon on the host (or in a `pid: host` container) then covers ROS processes in any container without configuration; verified by the `images` CI job against Rolling nodes in a container |
+| Shims | static list per host | static list **plus discovery**: `/proc/<pid>/maps` is scanned every 5 s for `librmw_implementation.so`, keyed by the mapped file's `dev:inode` (the real inode even through overlayfs), attached via `/proc/<pid>/root/<path>` | a daemon on the host (or in a `pid: host` container) then covers ROS processes in any container without configuration; verified against Rolling nodes in a container |
 | Pin layout | `/sys/fs/bpf/ros2ebpf/<shim-id>/` | one map set under `/sys/fs/bpf/ros2ebpf/`, `config.abi` field checked at start; incompatible pins are recreated | maps are keyed by `(pid, handle)` so one set serves every shim; a per-shim split would only complicate the exporter |
 | Process exit | BPF deletes keys | BPF pushes `EXIT_PID` to the ring buffer; the daemon sweeps the maps in user space; a 30 s GC sweeps dead pids as a safety net | BPF cannot iterate a hash map by a key prefix; user space can, off the hot path |
 | Service metrics | `_request_total` / `_response_total` | same names with a `side` label (`client` / `server`) | both ends of a call are observable (`rmw_send_request` + `rmw_take_request`), and the server side is the durable record for short-lived clients |

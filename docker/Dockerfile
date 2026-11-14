@@ -1,7 +1,8 @@
-# ros2ebpfd runtime image: daemon + exporter + ros2ebpf-ctl, no ROS inside.
-# Build from the repository root:  docker build -f docker/Dockerfile.daemon -t ros2ebpfd .
+# ros2ebpfd image for the Kubernetes DaemonSet (deploy/k8s/robot): daemon + exporter + ros2ebpf-ctl, no ROS inside.
+# Build from the repository root:  docker build -f docker/Dockerfile -t ros2ebpfd .
 # The build stage needs ament_cmake + colcon (ros:rolling-ros-base, Ubuntu 26.04); the runtime stage is plain Ubuntu 26.04.
-# ros2ebpf follows ROS 2 Rolling only (#15): no other distro is a valid base.
+# ros2ebpf follows ROS 2 Rolling only (#15): no other distro is a valid base. Everything else
+# (building, the tutorial, CI) happens in the development container of README section 4.
 FROM ros:rolling-ros-base AS build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=build /opt/ros2ebpf/bin/ /usr/local/bin/
 COPY --from=build /opt/ros2ebpf/etc/ /usr/local/etc/
 COPY --from=build /opt/ros2ebpf/share/ros2ebpf_daemon/ /usr/local/share/ros2ebpf_daemon/
-COPY docker/entrypoint-daemon.sh /usr/local/bin/entrypoint.sh
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN mkdir -p /etc/ros2ebpf /run/ros2ebpf \
     && cp /usr/local/etc/ros2ebpf/config.example.yaml /etc/ros2ebpf/config.example.yaml \
     && cp /usr/local/etc/ros2ebpf/expectations.example.yaml /etc/ros2ebpf/expectations.example.yaml

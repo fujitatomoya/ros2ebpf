@@ -1,9 +1,0 @@
-# Demo ROS 2 nodes for the bench / e2e test: talker + listener + add_two_ints.
-FROM ros:rolling-ros-base
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ros-rolling-demo-nodes-cpp ros-rolling-demo-nodes-py \
-    && rm -rf /var/lib/apt/lists/*
-COPY docker/demo.sh /usr/local/bin/demo.sh
-ENTRYPOINT ["/ros_entrypoint.sh"]
-CMD ["/usr/local/bin/demo.sh"]

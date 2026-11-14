@@ -26,32 +26,6 @@ jobs:
         run: |
           ./scripts/github_workflows.sh
 
-  images:
-    name: container images (rolling binaries) + cross-container discovery
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - name: Build the daemon, CLI and demo images
-        run: |
-          docker build -f docker/Dockerfile.daemon -t ros2ebpfd:ci .
-          docker build -f docker/Dockerfile.cli -t ros2ebpf-cli:ci .
-          docker build -f docker/Dockerfile.demo -t ros2ebpf-demo:ci .
-          docker run --rm ros2ebpf-cli:ci ros2 ebpf --help
-      - name: Daemon in its own container discovers the demo container's shim
-        run: |
-          sudo mount -t bpf bpf /sys/fs/bpf || true
-          docker run -d --name r2e-demo --network host -e ROS_DOMAIN_ID=5 ros2ebpf-demo:ci
-          docker run -d --name r2e-daemon --pid host --privileged \
-            -v /sys/fs/bpf:/sys/fs/bpf -v /sys/kernel/btf:/sys/kernel/btf:ro -e ROS2EBPF_HOST=ci ros2ebpfd:ci
-          for i in $(seq 1 30); do docker exec r2e-daemon ros2ebpf-ctl status -q >/dev/null 2>&1 && break; sleep 1; done
-          docker logs r2e-daemon
-          docker exec r2e-daemon ros2ebpf-ctl status -q
-          sleep 5
-          docker exec r2e-daemon ros2ebpf-ctl metrics | grep -E '^ros2(ebpf_host_info|_rmw_publish_total)\{' | tee /tmp/metrics.txt
-          grep -E '^ros2_rmw_publish_total\{host="ci",domain_id="5",comm="talker",topic="/chatter"\} [1-9]' /tmp/metrics.txt
-          grep -E '^ros2ebpf_host_info\{.*shim_path="/proc/[0-9]+/root/opt/ros/rolling/.*offset_table="rolling/' /tmp/metrics.txt
-          docker rm -f r2e-demo r2e-daemon
-
   deploy-lint:
     name: deploy manifests
     runs-on: ubuntu-24.04
@@ -72,3 +46,7 @@ jobs:
           docker run --rm -v "$PWD/deploy:/d:ro" registry.k8s.io/kustomize/kustomize:v5.4.3 build /d/k8s/central/kustomize/plain > /dev/null
       - name: alloy fmt
         run: docker run --rm -v "$PWD/deploy/alloy:/a:ro" grafana/alloy:v1.6.1 fmt /a/config.alloy > /dev/null
+      - name: ros2ebpfd image of the DaemonSet builds (docker/Dockerfile, rolling binaries)
+        run: |
+          docker build -f docker/Dockerfile -t ros2ebpfd:ci .
+          docker run --rm --entrypoint ros2ebpfd ros2ebpfd:ci --version

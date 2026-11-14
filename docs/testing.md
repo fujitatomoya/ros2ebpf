@@ -36,8 +36,6 @@ Assertions on `ros2ebpf-ctl metrics`:
 - counters survive `ros2 ebpf stop` + `ros2 ebpf start` (pinned maps);
 - `ros2 ebpf status` and `ros2 ebpf top --once` (mainline ros2cli) against the daemon.
 
-The `images` job covers the cross-container case of README tutorial B: `ros2ebpfd:ci` with `--pid host --privileged` and no config discovers the shim of the `ros2ebpf-demo:ci` container through `/proc/<pid>/root` and counts its talker.
-
 Last verified run (kernel 7.0 host, ros2dev:rolling container, mainline source):
 
 ```

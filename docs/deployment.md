@@ -24,8 +24,8 @@ Repeat on each host (`main`, `perception`, `arm` …).
 Hosts may run different RMWs and CPU architectures (all on ROS 2 Rolling); each daemon exports what it found in `ros2ebpf_host_info`.
 
 ```bash
-# install: the development container build (README §4), the container image (README §5), or the
-# ros-rolling-ros2ebpf-daemon package once the packages are released to the ROS build farm
+# install: the development container build (README §4), the ros2ebpfd image (docker/Dockerfile, below), or
+# the ros-rolling-ros2ebpf-daemon package once the packages are released to the ROS build farm
 sudo mkdir -p /etc/ros2ebpf && sudo cp install/etc/ros2ebpf/config.example.yaml /etc/ros2ebpf/config.yaml
 sudoedit /etc/ros2ebpf/config.yaml
 ```
@@ -57,7 +57,7 @@ Do not expose it beyond the robot LAN.
 
 ### Container instead of a package
 
-Same on every host, with Docker/Podman (see README §5 for the flags and why):
+Same on every host, with Docker/Podman; the flags are those of the development container (README 4.1), and the image is built with `docker build -f docker/Dockerfile -t ros2ebpfd .`:
 
 ```bash
 docker run -d --name ros2ebpfd --restart unless-stopped --pid host --privileged \
