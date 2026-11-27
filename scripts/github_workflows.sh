@@ -27,6 +27,13 @@
 #   docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src \
 #     tomoyafujita/ros2dev:rolling ./scripts/github_workflows.sh
 #
+# The ros2dev image is amd64 only. On aarch64 (the arm64 CI job, on an arm64 runner) the script
+# runs in the official ros:<distro>-ros-base image instead, with ROS2EBPF_CI_ROSDEP=1 to install
+# the build dependencies with rosdep first; everything else is the same, on an aarch64 kernel:
+#
+#   docker run --rm --privileged --pid host -v "$PWD":/src:ro -w /src -e ROS2EBPF_CI_ROSDEP=1 \
+#     ros:rolling-ros-base ./scripts/github_workflows.sh
+#
 # The interactive version of the same build, in the same container, is
 # the README demo (development container); docs/development.md has the rest.
 #
@@ -83,6 +90,31 @@ function setup_colcon_env () {
     rm -rf ${COLCON_WORKSPACE}/src/ros2ebpf
     cp -rf $there ${COLCON_WORKSPACE}/src/ros2ebpf
     rm -rf ${COLCON_WORKSPACE}/src/ros2ebpf/{build,install,log}
+}
+
+function install_build_dependencies () {
+    # Only with ROS2EBPF_CI_ROSDEP=1: the ros2dev image has every build dependency of the distro
+    # already, but it is amd64 only. The arm64 job runs in ros:<distro>-ros-base instead (vcs,
+    # colcon, rosdep, compilers), so the system dependencies of the packages built here (mainline
+    # up to rmw, ros2cli and demo_nodes_cpp, plus ros2ebpf) are installed with rosdep.
+    trap exit_trap ERR
+    [ "${ROS2EBPF_CI_ROSDEP:-0}" = 1 ] || return 0
+    echo "[${FUNCNAME[0]}]: install the build dependencies with rosdep."
+    cd ${COLCON_WORKSPACE}
+    rosdep update --rosdistro ${ROS_DISTRO}
+    local paths
+    paths=$(colcon list --paths-only --packages-up-to rmw ros2cli demo_nodes_cpp ${ROS2EBPF_PACKAGES})
+    # Skipped keys: the packages under COLCON_IGNORE (setup_colcon_env), which rosdep would
+    # otherwise install as binaries (rmw_connextdds pulls RTI Connext, whose license prompt stops
+    # apt), and their vendored middlewares; libbpf-dev and bpftool have no rosdep key yet,
+    # install_prerequisites installed them.
+    local skip
+    skip="libbpf-dev bpftool $(find src -name COLCON_IGNORE -printf '%h\n' | while read -r d; do
+        find "$d" -name package.xml -exec sed -n 's|.*<name>\(.*\)</name>.*|\1|p' {} \; ; done | tr '\n' ' ')"
+    echo "rosdep skip keys: ${skip}"
+    # shellcheck disable=SC2086  # one argument per path
+    rosdep install -y --rosdistro ${ROS_DISTRO} --ignore-src --from-paths ${paths} --skip-keys "${skip}"
+    cd $there
 }
 
 function build_colcon_package () {
@@ -316,6 +348,7 @@ trap exit_trap ERR
 # call functions in sequence
 install_prerequisites
 setup_colcon_env
+install_build_dependencies
 build_colcon_package
 test_colcon_package
 check_rmw_offsets

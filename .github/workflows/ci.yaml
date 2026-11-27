@@ -26,6 +26,39 @@ jobs:
         run: |
           ./scripts/github_workflows.sh
 
+  arm64:
+    # The same script on an aarch64 kernel: BPF objects through the arm64 verifier, uprobes on the
+    # arm64 librmw_implementation.so, the aarch64 offset rows against mainline, and the end-to-end
+    # test. ros2dev is amd64 only, so the job runs in ros:<distro>-ros-base and installs the build
+    # dependencies with rosdep (ROS2EBPF_CI_ROSDEP=1).
+    name: arm64 rolling source build (same as above, on an aarch64 runner)
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ros:rolling-ros-base
+      options: --privileged --pid=host
+    env:
+      ROS2EBPF_CI_ROSDEP: 1
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+      - name: Build and test with ROS rolling on aarch64
+        shell: bash
+        run: |
+          ./scripts/github_workflows.sh
+
+  offsets-aarch64:
+    # A quick check of the aarch64 rows of src/offsets.c against the rmw headers of the arm64
+    # ros:<distro>-ros-base image under qemu-user (struct offsets only, no BPF), next to the arm64 job.
+    name: aarch64 offsets vs released binaries (qemu)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: scripts/check_offsets_arch.sh aarch64
+        run: ./scripts/check_offsets_arch.sh aarch64
+
   deploy-lint:
     name: deploy manifests
     runs-on: ubuntu-24.04

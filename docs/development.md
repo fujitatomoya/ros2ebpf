@@ -126,6 +126,10 @@ There are no release branches yet: the first one is created when the packages ar
 
 - `rolling`: `scripts/github_workflows.sh` inside the `tomoyafujita/ros2dev:rolling` container (privileged): Rolling source build of `rmw` / `rmw_implementation` / `ros2cli` / `demo_nodes_cpp`, `colcon build` + `colcon test` of all packages, flake8, offset table vs. mainline `rmw`, the daemon probing the mainline `librmw_implementation.so` (BPF verifier, all links attached), `ros2 ebpf` on mainline ros2cli, and the end-to-end test with the mainline demo nodes.
   The workflow file only calls the script, so CI changes are script changes that run identically with the `docker run` above.
+- `arm64`: the same script on an aarch64 runner (`ubuntu-24.04-arm`), so the BPF objects go through the arm64 verifier, the uprobes attach to an arm64 `librmw_implementation.so`, the `aarch64` rows are checked against mainline `rmw`, and the end-to-end test runs on aarch64.
+  `ros2dev` is amd64 only, so the job runs in `ros:rolling-ros-base` (vcs, colcon, rosdep, compilers) with `ROS2EBPF_CI_ROSDEP=1`: the script installs the build dependencies of the packages it builds with `rosdep` before the build.
+  The runner kernel is Ubuntu 24.04's, as on the x86_64 runners.
+- `offsets-aarch64`: `scripts/check_offsets_arch.sh aarch64` on the runner (qemu-user via `docker/setup-qemu-action`): `offsets/gen.sh` in the arm64 `ros:<distro>-ros-base` image for every distro with an `aarch64` row of `src/offsets.c`, which must match; struct offsets only, against the released binaries; a quick check of every aarch64 row without a source build, next to the `arm64` job.
 - `deploy-lint`: `deploy/k8s/sync.sh` must leave no diff, then validation of everything under `deploy/` (promtool on both Prometheus configs and the rules, amtool, kustomize, alloy fmt) and a build of the DaemonSet image (`docker/Dockerfile`).
 
 When a release branch is created, its workflow is a copy of the `rolling` job with the distro's `ros2dev` image, as in the other `fujitatomoya` repositories.
