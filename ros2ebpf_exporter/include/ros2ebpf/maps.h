@@ -20,13 +20,13 @@
 #endif
 
 /* Bump whenever a struct or map in this file changes layout. */
-#define ROS2EBPF_MAP_ABI 1
+#define ROS2EBPF_MAP_ABI 2
 
 #define ROS2EBPF_NAME_LEN      128   /* topic / service name, truncated */
 #define ROS2EBPF_RMW_ID_LEN     32   /* implementation_identifier, truncated */
 #define ROS2EBPF_COMM_LEN       16   /* TASK_COMM_LEN */
 #define ROS2EBPF_CONTAINER_LEN  64
-#define ROS2EBPF_HIST_BUCKETS   16   /* bounded buckets + 1 overflow (+Inf) */
+#define ROS2EBPF_HIST_BUCKETS   32   /* bounded buckets + 1 overflow (+Inf); power of two */
 #define ROS2EBPF_MAX_ENDPOINTS  65536
 #define ROS2EBPF_MAX_PIDS       4096
 #define ROS2EBPF_MAX_FILTERS    1024

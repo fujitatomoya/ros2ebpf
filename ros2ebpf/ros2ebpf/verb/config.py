@@ -36,7 +36,7 @@ KNOWN_KEYS = {
     'probes.udp_drops': (bool, ''),
     'probes.seq_gap': (list, 'topics with sequence gap tracking, or "all"'),
     'topics.exclude': (list, 'topics never counted'),
-    'histogram_buckets_seconds': (list, 'ascending upper bounds, max 15'),
+    'histogram_buckets_seconds': (list, 'ascending upper bounds, max 31'),
     'exporter.mode': (str, 'inprocess | external (restart)'),
     'exporter.listen': (str, 'host:port (restart)'),
     'exporter.rmw_label': (bool, 'add rmw label'),

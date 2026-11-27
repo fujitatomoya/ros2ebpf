@@ -22,7 +22,15 @@ void config_defaults(struct config *c)
     c->read_environ = 1;
     c->default_domain_id = 0;
     c->probe_publish = c->probe_take = c->probe_services = c->probe_udp_drops = 1;
-    static const double b[] = { 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5, 1 };
+    /* Around 10 ms, 100 ms and 1 s (100, 10, 1 Hz): bounds at 0.95, 0.98, 1.02, 1.05, 1.1 and 1.25 x the
+     * period, so that histogram_quantile() of a periodic topic stays close to the real p50 / p99 with a
+     * few % of timer jitter. Around 20, 33.3, 50, 200, 500 ms and 2 s: +-2 %. 31 bounds, the maximum. */
+    static const double b[] = { 0.0095, 0.0098, 0.0102, 0.0105, 0.011, 0.0125,
+                                0.0196, 0.0204, 0.0327, 0.034, 0.049, 0.051,
+                                0.095, 0.098, 0.102, 0.105, 0.11, 0.125,
+                                0.196, 0.204, 0.49, 0.51,
+                                0.95, 0.98, 1.02, 1.05, 1.1, 1.25,
+                                1.96, 2.04, 5 };
     c->n_buckets = sizeof(b) / sizeof(b[0]);
     memcpy(c->buckets, b, sizeof(b));
     c->n_exclude = 2;

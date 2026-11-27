@@ -26,7 +26,7 @@ Set `robot:` only if you do not run a collector that adds the `robot` label ([de
 | `probes.publish/take/services/udp_drops` | `true` | probe families |
 | `probes.seq_gap` | `[]` | topics with sequence-gap tracking on take, or `all` |
 | `topics.exclude` | `[/parameter_events, /rosout]` | never counted (an explicit `[]` clears the default) |
-| `histogram_buckets_seconds` | 0.5 ms … 1 s (10 bounds) | inter-publish interval histogram, ≤ 15 bounds |
+| `histogram_buckets_seconds` | 0.95, 0.98, 1.02, 1.05, 1.1, 1.25 × 10 ms, 100 ms and 1 s; ±2 % around 20, 33.3, 50, 200, 500 ms and 2 s; 5 s (31 bounds) | inter-publish interval histogram, ≤ 31 bounds; for a topic with another rate, replace some with bounds around its period |
 | `exporter.mode` | `inprocess` | `external` disables the built-in `/metrics`; run `ros2ebpf-exporter` (*restart*) |
 | `exporter.listen` | `0.0.0.0:9477` | (*restart*) |
 | `exporter.rmw_label` | `false` | add `rmw="…"` to endpoint series |

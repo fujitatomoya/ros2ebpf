@@ -18,7 +18,7 @@ int main(int argc, char **argv)
 
     struct config c;
     config_defaults(&c);
-    CHECK(c.n_buckets == 10 && c.probe_publish && c.read_environ && c.discover_shims);
+    CHECK(c.n_buckets == 31 && c.probe_publish && c.read_environ && c.discover_shims);
     CHECK(c.n_exclude == 2 && !strcmp(c.exclude[1], "/rosout"));
     CHECK(config_load(&c, path) == 0);
     CHECK(!strcmp(c.host, "main"));
@@ -46,7 +46,7 @@ int main(int argc, char **argv)
     config_defaults(&c2);
     CHECK(config_load(&c2, path) == 0);
     CHECK(c2.seq_gap_all == 1 && c2.n_seq_gap == 0);
-    CHECK(c2.n_buckets == 10);  /* defaults kept */
+    CHECK(c2.n_buckets == 31);  /* defaults kept */
     CHECK(c2.n_exclude == 0);   /* explicit empty list clears the default */
 
     /* invalid */

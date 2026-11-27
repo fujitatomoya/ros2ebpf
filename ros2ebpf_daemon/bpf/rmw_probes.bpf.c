@@ -116,6 +116,14 @@ struct {
     __type(value, struct take_args);
 } take_args SEC(".maps");
 
+/* first_sight() builds a new endpoints value here: with the histogram it is too large for the stack */
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct ros2ebpf_endpoint_stats);
+} stats_scratch SEC(".maps");
+
 /* ---- helpers ------------------------------------------------------------ */
 
 static __always_inline __u32 cur_pid(void)
@@ -191,10 +199,13 @@ first_sight(struct ros2ebpf_endpoint_key *key, __u8 kind, __u64 now)
 
     bpf_map_update_elem(&endpoint_info, key, &info, BPF_NOEXIST);
 
-    struct ros2ebpf_endpoint_stats fresh = {};
-    fresh.flags = flags;
-    fresh.kind = kind;
-    if (bpf_map_update_elem(&endpoints, key, &fresh, BPF_NOEXIST) != 0) {
+    struct ros2ebpf_endpoint_stats *fresh = bpf_map_lookup_elem(&stats_scratch, &zero);
+    if (!fresh)
+        return NULL;
+    __builtin_memset(fresh, 0, sizeof(*fresh));
+    fresh->flags = flags;
+    fresh->kind = kind;
+    if (bpf_map_update_elem(&endpoints, key, fresh, BPF_NOEXIST) != 0) {
         struct ros2ebpf_endpoint_stats *existing = bpf_map_lookup_elem(&endpoints, key);
         if (!existing)
             self_inc(ROS2EBPF_SC_MAP_FULL);

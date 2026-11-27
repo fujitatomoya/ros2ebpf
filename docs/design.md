@@ -322,7 +322,7 @@ probes:
   udp_drops: true
 topics:
   exclude: [/parameter_events, /rosout]
-histogram_buckets_seconds: [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5, 1]
+histogram_buckets_seconds: [0.0095, 0.0098, 0.0102, 0.0105, 0.011, 0.0125, 0.0196, 0.0204, 0.0327, 0.034, 0.049, 0.051, 0.095, 0.098, 0.102, 0.105, 0.11, 0.125, 0.196, 0.204, 0.49, 0.51, 0.95, 0.98, 1.02, 1.05, 1.1, 1.25, 1.96, 2.04, 5]
 exporter:
   mode: inprocess             # inprocess | external
   listen: 0.0.0.0:9477

@@ -89,6 +89,12 @@ sum by (robot, topic) (rate(ros2_rmw_take_total[1m]))
 
 # p99 inter-publish interval (jitter) of one publisher
 histogram_quantile(0.99, sum by (le) (rate(ros2_rmw_publish_period_seconds_bucket{robot="amr-07",topic="/imu/data"}[5m])))
+# (resolved only to the buckets around the period: 2, 5, 10, 25 % steps around 10 ms, 100 ms and 1 s,
+#  ±2 % around the other default periods, see histogram_buckets_seconds in configuration.md;
+#  outside them it is interpolated in a wide bucket)
+
+# mean inter-publish interval, exact
+rate(ros2_rmw_publish_period_seconds_sum[5m]) / rate(ros2_rmw_publish_period_seconds_count[5m])
 
 # service latency proxy: requests sent vs responses taken on the client side
 sum by (service) (rate(ros2_rmw_service_request_total{side="client"}[1m]))
