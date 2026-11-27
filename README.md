@@ -117,7 +117,7 @@ docker run -it --name ros2ebpf-dev --privileged --pid host --network host \
 | Option | Why |
 |---|---|
 | `--privileged` | load the BPF programs and attach the uprobes (`CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_PTRACE`); without it the daemon fails at `attach … Operation not permitted` |
-| `--pid host` | the BPF programs report host pids and the daemon resolves them through `/proc`; without it every process is `unknown`. It is also how the daemon finds ROS processes in other containers |
+| `--pid host` | the daemon counts the processes of its own pid namespace (the BPF programs report pids of that namespace, which the daemon resolves through `/proc`); with the host's, that is every process on the host and in other containers, and it is how the daemon finds their shims. Without it only the processes of the same container are counted |
 | `--network host` | every container of this demo is on the host network: the daemon's `:9477` is `localhost` for Prometheus, Prometheus is `localhost` for Grafana, and DDS works between nodes in different containers |
 | `-v /sys/fs/bpf:/sys/fs/bpf` | the pinned maps live on the host's bpffs, so counters survive the container |
 | `-v /etc/machine-id` | the `machine_id` label; optional |

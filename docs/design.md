@@ -188,6 +188,7 @@ Mixed fleets are the norm, so the table is keyed by both and the daemon exports 
 | `domain_id` | the ROS 2 graph the process is part of | per process | daemon, on every endpoint series |
 
 Per-process facts are resolved once per PID (the BPF program pushes unseen PIDs to a ring buffer, the daemon reads `/proc/<pid>/{comm,environ,cgroup,stat}` off the hot path) and dropped on `sched_process_exit`: `comm`, `domain_id` (`ROS_DOMAIN_ID`, default `0`, `unknown` if `environ` is unreadable), `rmw` (`RMW_IMPLEMENTATION`, or the shim's identifier read by the probe), `localhost_only`, `container` (from the cgroup path).
+The PIDs are those of the daemon's pid namespace (`bpf_get_ns_current_pid_tgid()` with the namespace of `/proc/self/ns/pid`, set before the programs load), the namespace whose `/proc` the daemon reads: `bpf_get_current_pid_tgid()` gives the initial namespace's PID, a different number when the daemon's namespace is a nested one (a WSL2 distro, a kind node). A task outside that namespace is not counted, since the daemon could not resolve it.
 Reading `environ` needs `PTRACE_MODE_READ`, hence `CAP_SYS_PTRACE` in the unit file.
 Containerised nodes have their shim resolved through `/proc/<pid>/root`.
 Every host keeps its own monotonic clock; cross-host correlation is done on rates over the same window, never on timestamps.

@@ -19,7 +19,7 @@ Reports what would fail at attach time: kernel version, BTF, bpffs, the pid
 namespace, capabilities, the shim(s) from config.yaml and their exported
 symbols, and whether the daemon and the exporter endpoint answer.
 When the daemon answers, its own metrics are read as well: a daemon that sees
-endpoints but resolves no process identity is not in the host pid namespace.
+endpoints but resolves no process identity cannot resolve the pids it sees through /proc.
 """
 
 import os
@@ -149,9 +149,10 @@ class DoctorVerb(VerbExtension):
         if ns is None:
             rep('WARN', 'pid namespace', '/proc/self/ns/pid unreadable')
         else:
-            rep('PASS' if ns else 'FAIL', 'pid namespace',
-                'host' if ns else 'not the host pid namespace: the probes report host pids and ros2ebpfd '
-                'cannot resolve them through /proc; run the container with --pid host (hostPID: true)')
+            rep('PASS' if ns else 'WARN', 'pid namespace',
+                'initial' if ns else 'not the initial pid namespace: ros2ebpfd counts the processes of its own '
+                'pid namespace only; in a container, run it with --pid host (hostPID: true) to cover the host '
+                'and the other containers (a WSL2 distro or a kind node is a nested namespace itself: fine)')
 
         caps = effective_caps()
         if os.geteuid() == 0 or caps & (1 << CAP_SYS_ADMIN):
@@ -225,8 +226,8 @@ class DoctorVerb(VerbExtension):
                     if endpoints and processes == 0 and failures:
                         rep('FAIL', 'daemon identity',
                             f'{int(endpoints)} endpoint(s) seen but no process resolved '
-                            f'({int(failures)} failures): ros2ebpfd is not in the host pid namespace '
-                            '(--pid host / hostPID: true); no ros2_* series are exported until it is')
+                            f'({int(failures)} failures): ros2ebpfd cannot resolve the pids it sees through /proc '
+                            '(see docs/troubleshooting.md); no ros2_* series are exported until it does')
                     elif endpoints is not None and processes is not None:
                         rep('PASS', 'daemon identity', f'{int(processes)} process(es), {int(endpoints)} endpoint(s)')
                 except Exception as e:

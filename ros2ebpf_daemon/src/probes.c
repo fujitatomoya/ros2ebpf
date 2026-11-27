@@ -108,6 +108,18 @@ static int open_load(struct probes *p)
     p->rmw = rmw_probes_bpf__open_opts(&opts);
     if (!p->rmw)
         return -errno ? -errno : -EINVAL;
+    /* pids in the maps are the ones of our pid namespace, the one /proc shows us (see
+     * pidns_dev/pidns_ino in rmw_probes.bpf.c) */
+    struct stat ns;
+    if (stat("/proc/self/ns/pid", &ns) == 0) {
+        p->rmw->rodata->pidns_dev = ns.st_dev;
+        p->rmw->rodata->pidns_ino = ns.st_ino;
+        log_info("pid namespace: dev=%u:%u ino=%llu", major(ns.st_dev), minor(ns.st_dev),
+                 (unsigned long long)ns.st_ino);
+    } else {
+        log_warn("cannot stat /proc/self/ns/pid (%s): pids are the initial namespace's, "
+                 "which /proc only matches when the daemon runs in it", strerror(errno));
+    }
     int rc = rmw_probes_bpf__load(p->rmw);
     if (rc) {
         rmw_probes_bpf__destroy(p->rmw);

@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: tomoyafujita/ros2dev:rolling
-      # privileged: bpffs mount + BPF program load. pid=host: the BPF programs report host-namespace
-      # pids, which the daemon resolves through /proc (same requirement as a containerised deployment).
+      # privileged: bpffs mount + BPF program load. pid=host: the daemon counts the processes of its
+      # pid namespace, the host's here (same requirement as a containerised deployment).
       options: --privileged --pid=host
     steps:
       - name: Check out repository code

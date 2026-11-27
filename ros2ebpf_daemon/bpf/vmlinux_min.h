@@ -132,4 +132,11 @@ struct task_struct {
 
 #pragma clang attribute pop
 
+/* UAPI (include/uapi/linux/bpf.h), filled by bpf_get_ns_current_pid_tgid(): a stack value,
+ * no CO-RE relocation. */
+struct bpf_pidns_info {
+    __u32 pid;
+    __u32 tgid;
+};
+
 #endif /* ROS2EBPF_VMLINUX_MIN_H */

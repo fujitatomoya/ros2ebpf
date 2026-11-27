@@ -118,9 +118,29 @@ struct {
 
 /* ---- helpers ------------------------------------------------------------ */
 
+/* The daemon's pid namespace (dev, inode of /proc/self/ns/pid), set before load. Every pid in
+ * the maps and events is the one of that namespace, the one the daemon resolves through /proc.
+ * bpf_get_current_pid_tgid() gives the pid of the initial namespace instead, which is a
+ * different number when the daemon's namespace is a nested one: a WSL2 distro, a node of a kind
+ * cluster, a container without host pid. 0/0 (not set) keeps the initial-namespace pid. */
+const volatile __u64 pidns_dev = 0;
+const volatile __u64 pidns_ino = 0;
+
+/* tgid (<< 32) | tid in the daemon's pid namespace, or 0 for a task outside it (the daemon
+ * cannot see it in /proc, so it is not counted). */
+static __always_inline __u64 cur_pid_tgid(void)
+{
+    if (!pidns_ino)
+        return bpf_get_current_pid_tgid();
+    struct bpf_pidns_info ns = {};
+    if (bpf_get_ns_current_pid_tgid(pidns_dev, pidns_ino, &ns, sizeof(ns)) != 0)
+        return 0;
+    return ((__u64)ns.tgid << 32) | ns.pid;
+}
+
 static __always_inline __u32 cur_pid(void)
 {
-    return (__u32)(bpf_get_current_pid_tgid() >> 32);
+    return (__u32)(cur_pid_tgid() >> 32);
 }
 
 static __always_inline void announce_pid(__u32 pid, __u64 now)
@@ -210,6 +230,8 @@ lookup_or_create(__u64 handle, __u8 kind, __u64 now)
 {
     struct ros2ebpf_endpoint_key key = {};
     key.pid = cur_pid();
+    if (!key.pid)
+        return NULL;
     key.handle = handle;
     struct ros2ebpf_endpoint_stats *st = bpf_map_lookup_elem(&endpoints, &key);
     if (!st)
@@ -392,6 +414,8 @@ static __always_inline int on_destroy(struct pt_regs *ctx)
 {
     struct ros2ebpf_endpoint_key key = {};
     key.pid = cur_pid();
+    if (!key.pid)
+        return 0;
     key.handle = (__u64)PT_REGS_PARM2(ctx);
     bpf_map_delete_elem(&endpoints, &key);
     bpf_map_delete_elem(&endpoint_info, &key);
@@ -412,9 +436,9 @@ int BPF_UPROBE(rmw_destroy_service_enter) { return on_destroy(ctx); }
 SEC("tp_btf/sched_process_exit")
 int BPF_PROG(sched_process_exit, struct task_struct *p)
 {
-    __u64 id = bpf_get_current_pid_tgid();
+    __u64 id = cur_pid_tgid();
     __u32 tgid = id >> 32, tid = (__u32)id;
-    if (tgid != tid)
+    if (!tgid || tgid != tid)
         return 0;
     if (bpf_map_delete_elem(&seen_pids, &tgid) != 0)
         return 0;                            /* never produced an endpoint hit */
